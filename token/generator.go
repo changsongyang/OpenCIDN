@@ -3,6 +3,7 @@ package token
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -88,11 +89,11 @@ func (g *Generator) getToken(r *http.Request) (*Token, error) {
 	if scope != "" {
 		scopeSlice := strings.SplitN(scope, ":", 4)
 		if len(scopeSlice) != 3 {
-			return nil, errcode.ErrorCodeDenied
+			return nil, errcode.ErrorCodeDenied.WithMessage(fmt.Sprintf("Invalid scope %q", scope))
 		}
 
 		if scopeSlice[2] != "pull" {
-			return nil, errcode.ErrorCodeDenied
+			return nil, errcode.ErrorCodeDenied.WithMessage("Read Only")
 		}
 
 		t.Image = scopeSlice[1]

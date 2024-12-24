@@ -20,12 +20,15 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	reqCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
 	u := url.URL{
 		Scheme: "https",
 		Host:   info.Host,
 		Path:   fmt.Sprintf("/v2/%s/manifests/%s", info.Image, info.Manifests),
 	}
-	r, err := http.NewRequestWithContext(context.Background(), r.Method, u.String(), nil)
+	forwardReq, err := http.NewRequestWithContext(reqCtx, r.Method, u.String(), nil)
 	if err != nil {
 		c.logger.Error("failed to new request", "error", err)
 		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
@@ -35,7 +38,7 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 		"Accept": {"application/vnd.docker.distribution.manifest.v1+json,application/vnd.docker.distribution.manifest.v1+prettyjws,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.index.v1+json"},
 	}
 
-	resp, err := c.httpClient.Do(r)
+	resp, err := c.httpClient.Do(forwardReq)
 	if err != nil {
 		if c.fallbackServeCachedManifest(rw, r, info) {
 			return

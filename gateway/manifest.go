@@ -27,7 +27,7 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 		Host:   info.Host,
 		Path:   fmt.Sprintf("/v2/%s/manifests/%s", info.Image, info.Manifests),
 	}
-	forwardReq, err := http.NewRequestWithContext(reqCtx, r.Method, u.String(), nil)
+	forwardReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		c.logger.Error("failed to new request", "error", err)
 		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
@@ -98,10 +98,6 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 
 	rw.WriteHeader(resp.StatusCode)
 
-	if r.Method == http.MethodHead {
-		return
-	}
-
 	needCache := resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices
 	if !info.IsDigestManifests {
 		_, ok := c.accepts[resp.Header.Get("Content-Type")]
@@ -119,8 +115,17 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 			c.errorResponse(rw, r, err)
 			return
 		}
+
+		if r.Method == http.MethodHead {
+			return
+		}
+
 		rw.Write(body)
 	} else {
+		if r.Method == http.MethodHead {
+			return
+		}
+
 		io.Copy(rw, resp.Body)
 	}
 }

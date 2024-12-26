@@ -254,7 +254,7 @@ func (c *Agent) cacheBlob(r *http.Request, info *BlobInfo, stats func(int64)) (i
 		Host:   info.Host,
 		Path:   fmt.Sprintf("/v2/%s/blobs/%s", info.Image, info.Blobs),
 	}
-	r, err := http.NewRequestWithContext(context.Background(), r.Method, u.String(), nil)
+	r, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u.String(), nil)
 	if err != nil {
 		return 0, err
 	}

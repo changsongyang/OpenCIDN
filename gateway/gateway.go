@@ -42,6 +42,8 @@ type Gateway struct {
 	acceptsItems []string
 	accepts      map[string]struct{}
 
+	blobsLENoAgent int
+
 	agent *agent.Agent
 }
 
@@ -89,6 +91,12 @@ func WithCache(cache *cache.Cache) Option {
 	}
 }
 
+func WithBlobsLENoAgent(blobsLENoAgent int) Option {
+	return func(c *Gateway) {
+		c.blobsLENoAgent = blobsLENoAgent
+	}
+}
+
 func NewGateway(opts ...Option) (*Gateway, error) {
 	c := &Gateway{
 		logger: slog.Default(),
@@ -119,6 +127,7 @@ func NewGateway(opts ...Option) (*Gateway, error) {
 			agent.WithAuthenticator(c.authenticator),
 			agent.WithLogger(c.logger),
 			agent.WithCache(c.cache),
+			agent.WithBlobsLENoAgent(c.blobsLENoAgent),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create agent: %w", err)

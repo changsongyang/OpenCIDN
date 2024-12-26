@@ -29,6 +29,8 @@ type Agent struct {
 	logger        *slog.Logger
 	cache         *cache.Cache
 	authenticator *token.Authenticator
+
+	blobsLENoAgent int
 }
 
 type Option func(c *Agent) error
@@ -57,6 +59,13 @@ func WithAuthenticator(authenticator *token.Authenticator) Option {
 func WithClient(client *http.Client) Option {
 	return func(c *Agent) error {
 		c.httpClient = client
+		return nil
+	}
+}
+
+func WithBlobsLENoAgent(blobsLENoAgent int) Option {
+	return func(c *Agent) error {
+		c.blobsLENoAgent = blobsLENoAgent
 		return nil
 	}
 }
@@ -167,10 +176,11 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 			sleepDuration(float64(size), float64(t.RateLimitPerSecond))
 		}
 
-		err = c.redirect(rw, r, info.Blobs, info)
+		err = c.redirectOrRedirect(rw, r, info.Blobs, info, size)
 		if err != nil {
 			c.logger.Error("failed to redirect", "digest", info.Blobs, "error", err)
 			c.errorResponse(rw, r, ctx.Err())
+			return
 		}
 		return
 	}
@@ -218,7 +228,7 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 		case <-ctx.Done():
 			return
 		case <-signalCh:
-			err = c.redirect(rw, r, info.Blobs, info)
+			err = c.redirectOrRedirect(rw, r, info.Blobs, info, signal.size)
 			if err != nil {
 				c.logger.Error("failed to redirect", "digest", info.Blobs, "error", err)
 			}
@@ -286,7 +296,18 @@ func (c *Agent) errorResponse(rw http.ResponseWriter, r *http.Request, err error
 	errcode.ServeJSON(rw, err)
 }
 
-func (c *Agent) redirect(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo) error {
+func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, size int64) error {
+	if int64(c.blobsLENoAgent) > size {
+		data, err := c.cache.GetBlobContent(r.Context(), info.Blobs)
+		if err != nil {
+			return err
+		}
+		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+		rw.Header().Set("Content-Type", "application/octet-stream")
+		rw.Write(data)
+		return nil
+	}
+
 	referer := r.RemoteAddr
 	if info != nil {
 		referer += fmt.Sprintf(":%s/%s", info.Host, info.Image)
@@ -297,6 +318,6 @@ func (c *Agent) redirect(rw http.ResponseWriter, r *http.Request, blob string, i
 		return err
 	}
 	c.logger.Info("Cache hit", "digest", blob, "url", u)
-	http.Redirect(rw, r, u, http.StatusFound)
+	http.Redirect(rw, r, u, http.StatusTemporaryRedirect)
 	return nil
 }

@@ -233,7 +233,8 @@ func (m *Manager) GetTokenWithUser(ctx context.Context, userinfo *url.Userinfo, 
 		NoBlock:       tok.Data.NoBlock,
 		AllowTagsList: tok.Data.AllowTagsList,
 
-		BlobsURL: tok.Data.BlobsURL,
+		BlobsAgentURL: tok.Data.BlobsAgentURL,
+		NoBlobsAgent:  tok.Data.NoBlobsAgent,
 
 		Block:        tok.Data.Block,
 		BlockMessage: tok.Data.BlockMessage,

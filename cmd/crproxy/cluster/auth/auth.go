@@ -171,8 +171,8 @@ func runE(ctx context.Context, flags *flagpole) error {
 					}
 					t.RateLimitPerSecond = flags.AnonymousRateLimitPerSecond
 
-					if !t.Block {
-						t.BlobsURL = getHosts()
+					if !t.Block && !t.NoBlobsAgent {
+						t.BlobsAgentURL = getHosts()
 					}
 					return t.Attribute, true
 				}
@@ -187,9 +187,9 @@ func runE(ctx context.Context, flags *flagpole) error {
 			t.Attribute = attr
 		}
 
-		if !t.Block {
-			if t.BlobsURL == "" {
-				t.BlobsURL = getHosts()
+		if !t.Block && !t.NoBlobsAgent {
+			if t.BlobsAgentURL == "" {
+				t.BlobsAgentURL = getHosts()
 			}
 		}
 

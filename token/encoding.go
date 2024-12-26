@@ -53,7 +53,8 @@ type Attribute struct {
 	Host  string `json:"host,omitempty"`
 	Image string `json:"image,omitempty"`
 
-	BlobsURL string `json:"blobs_url,omitempty"`
+	NoBlobsAgent  bool   `json:"no_blobs_agent,omitempty"`
+	BlobsAgentURL string `json:"blobs_url,omitempty"`
 
 	Block        bool   `json:"block,omitempty"`
 	BlockMessage string `json:"block_message,omitempty"`

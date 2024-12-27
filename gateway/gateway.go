@@ -43,6 +43,7 @@ type Gateway struct {
 	overrideDefaultRegistry map[string]string
 
 	acceptsItems []string
+	acceptsStr   string
 	accepts      map[string]struct{}
 
 	blobsLENoAgent int
@@ -127,6 +128,7 @@ func NewGateway(opts ...Option) (*Gateway, error) {
 	for _, item := range c.acceptsItems {
 		c.accepts[item] = struct{}{}
 	}
+	c.acceptsStr = strings.Join(c.acceptsItems, ",")
 
 	for _, opt := range opts {
 		opt(c)
@@ -288,19 +290,19 @@ func (c *Gateway) forward(rw http.ResponseWriter, r *http.Request, info *PathInf
 		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
 		return
 	}
-	u := url.URL{
+	u := &url.URL{
 		Scheme: "https",
 		Host:   info.Host,
 		Path:   path,
 	}
-	r, err = http.NewRequestWithContext(r.Context(), r.Method, u.String(), nil)
+	forwardReq, err := http.NewRequestWithContext(r.Context(), r.Method, u.String(), nil)
 	if err != nil {
 		c.logger.Warn("failed to new request", "error", err)
 		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
 		return
 	}
 
-	resp, err := c.httpClient.Do(r)
+	resp, err := c.httpClient.Do(forwardReq)
 	if err != nil {
 		c.logger.Warn("failed to request", "host", info.Host, "image", info.Image, "error", err)
 		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
@@ -333,7 +335,7 @@ func (c *Gateway) forward(rw http.ResponseWriter, r *http.Request, info *PathInf
 	}
 	rw.WriteHeader(resp.StatusCode)
 
-	if r.Method != http.MethodHead {
+	if forwardReq.Method != http.MethodHead {
 		var body io.Reader = resp.Body
 
 		if t.RateLimitPerSecond > 0 {

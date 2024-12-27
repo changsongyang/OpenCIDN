@@ -147,7 +147,7 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 		select {
 		case <-ctx.Done():
 			err := ctx.Err().Error()
-			c.logger.Error("context done", "error", err)
+			c.logger.Warn("context done", "error", err)
 			http.Error(rw, err, http.StatusInternalServerError)
 			return
 		case <-closeCh:
@@ -176,12 +176,7 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 			sleepDuration(float64(size), float64(t.RateLimitPerSecond))
 		}
 
-		err = c.redirectOrRedirect(rw, r, info.Blobs, info, size)
-		if err != nil {
-			c.logger.Error("failed to redirect", "digest", info.Blobs, "error", err)
-			c.errorResponse(rw, r, ctx.Err())
-			return
-		}
+		c.redirectOrRedirect(rw, r, info.Blobs, info, size)
 		return
 	}
 	c.logger.Info("Cache miss", "digest", info.Blobs)
@@ -194,7 +189,7 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 
 	go func() {
 		defer doneCache()
-		size, err := c.cacheBlob(r, info, func(size int64) {
+		size, err := c.cacheBlob(info, func(size int64) {
 			signalCh <- signal{
 				size: size,
 			}
@@ -227,11 +222,12 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 		select {
 		case <-ctx.Done():
 			return
-		case <-signalCh:
-			err = c.redirectOrRedirect(rw, r, info.Blobs, info, signal.size)
-			if err != nil {
-				c.logger.Error("failed to redirect", "digest", info.Blobs, "error", err)
+		case signal := <-signalCh:
+			if signal.err != nil {
+				c.errorResponse(rw, r, signal.err)
+				return
 			}
+			c.redirectOrRedirect(rw, r, info.Blobs, info, signal.size)
 		}
 		return
 	}
@@ -248,18 +244,18 @@ func sleepDuration(size, limit float64) {
 	}
 }
 
-func (c *Agent) cacheBlob(r *http.Request, info *BlobInfo, stats func(int64)) (int64, error) {
-	u := url.URL{
+func (c *Agent) cacheBlob(info *BlobInfo, stats func(int64)) (int64, error) {
+	u := &url.URL{
 		Scheme: "https",
 		Host:   info.Host,
 		Path:   fmt.Sprintf("/v2/%s/blobs/%s", info.Image, info.Blobs),
 	}
-	r, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u.String(), nil)
+	forwardReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u.String(), nil)
 	if err != nil {
 		return 0, err
 	}
 
-	resp, err := c.httpClient.Do(r)
+	resp, err := c.httpClient.Do(forwardReq)
 	if err != nil {
 		return 0, err
 	}
@@ -296,16 +292,18 @@ func (c *Agent) errorResponse(rw http.ResponseWriter, r *http.Request, err error
 	errcode.ServeJSON(rw, err)
 }
 
-func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, size int64) error {
+func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, size int64) {
 	if int64(c.blobsLENoAgent) > size {
 		data, err := c.cache.GetBlobContent(r.Context(), info.Blobs)
 		if err != nil {
-			return err
+			c.logger.Error("failed to get blob", "digest", info.Blobs, "error", err)
+			c.errorResponse(rw, r, err)
+			return
 		}
 		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 		rw.Header().Set("Content-Type", "application/octet-stream")
 		rw.Write(data)
-		return nil
+		return
 	}
 
 	referer := r.RemoteAddr
@@ -315,9 +313,10 @@ func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob
 
 	u, err := c.cache.RedirectBlob(r.Context(), blob, referer)
 	if err != nil {
-		return err
+		c.logger.Error("failed to get redirect", "digest", info.Blobs, "error", err)
+		c.errorResponse(rw, r, err)
+		return
 	}
 	c.logger.Info("Cache hit", "digest", blob, "url", u)
 	http.Redirect(rw, r, u, http.StatusTemporaryRedirect)
-	return nil
 }

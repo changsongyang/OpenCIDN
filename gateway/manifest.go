@@ -8,7 +8,6 @@ import (
 	"net/textproto"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/daocloud/crproxy/token"
@@ -16,7 +15,8 @@ import (
 )
 
 func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request, info *PathInfo, t *token.Token) {
-	if c.tryFirstServeCachedManifest(rw, r, info) {
+	done, fallback := c.tryFirstServeCachedManifest(rw, r, info)
+	if done {
 		return
 	}
 
@@ -41,15 +41,16 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 	if info.IsDigestManifests {
 		forwardReq.Header.Set("Accept", r.Header.Get("Accept"))
 	} else {
-		forwardReq.Header.Set("Accept", strings.Join(c.acceptsItems, ","))
+		forwardReq.Header.Set("Accept", c.acceptsStr)
 	}
 
 	resp, err := c.httpClient.Do(forwardReq)
 	if err != nil {
-		if c.fallbackServeCachedManifest(rw, r, info) {
+		if fallback && c.fallbackServeCachedManifest(rw, r, info) {
+			c.logger.Warn("failed to request, but hit caches", "url", u.String(), "error", err)
 			return
 		}
-		c.logger.Error("failed to request", "url", u, "error", err)
+		c.logger.Error("failed to request", "url", u.String(), "error", err)
 		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
 		return
 	}
@@ -59,33 +60,21 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 
 	switch resp.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
-		if c.fallbackServeCachedManifest(rw, r, info) {
-			c.logger.Error("origin manifest response 40x, but hit caches", "url", u, "response", dumpResponse(resp))
+		if fallback && c.fallbackServeCachedManifest(rw, r, info) {
+			c.logger.Warn("origin manifest response, but hit caches", "statusCode", resp.StatusCode, "url", u.String(), "response", dumpResponse(resp))
 			return
 		}
-		c.logger.Error("origin manifest response 40x", "url", u, "response", dumpResponse(resp))
+		c.logger.Error("origin manifest response", "statusCode", resp.StatusCode, "url", u.String(), "response", dumpResponse(resp))
 		errcode.ServeJSON(rw, errcode.ErrorCodeDenied)
 		return
 	}
 
-	if resp.StatusCode >= http.StatusBadRequest && resp.StatusCode < http.StatusInternalServerError {
-		if c.fallbackServeCachedManifest(rw, r, info) {
-			c.logger.Error("origin manifest response 4xx, but hit caches", "url", u, "response", dumpResponse(resp))
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if fallback && c.fallbackServeCachedManifest(rw, r, info) {
+			c.logger.Warn("origin manifest response, but hit caches", "statusCode", resp.StatusCode, "url", u.String(), "response", dumpResponse(resp))
 			return
 		}
-		c.logger.Error("origin manifest response 4xx", "url", u)
-	} else if resp.StatusCode >= http.StatusInternalServerError {
-		if c.fallbackServeCachedManifest(rw, r, info) {
-			c.logger.Error("origin manifest response 5xx, but hit caches", "url", u, "response", dumpResponse(resp))
-			return
-		}
-		c.logger.Error("origin manifest response 5xx", "url", u)
-	} else if resp.StatusCode < http.StatusOK {
-		if c.fallbackServeCachedManifest(rw, r, info) {
-			c.logger.Error("origin manifest response 1xx, but hit caches", "url", u, "response", dumpResponse(resp))
-			return
-		}
-		c.logger.Error("origin manifest response 1xx", "url", u)
+		c.logger.Error("origin manifest response", "statusCode", resp.StatusCode, "url", u.String())
 	}
 
 	resp.Header.Del("Docker-Ratelimit-Source")
@@ -130,19 +119,19 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 	}
 }
 
-func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) bool {
+func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) (done bool, fallback bool) {
 	if !info.IsDigestManifests && c.manifestCacheDuration > 0 {
 		last, ok := c.manifestCache.Load(manifestCacheKey(info))
 		if !ok {
-			return false
+			return false, true
 		}
 
 		if time.Since(last) > c.manifestCacheDuration {
-			return false
+			return false, true
 		}
 	}
 
-	return c.serveCachedManifest(rw, r, info)
+	return c.serveCachedManifest(rw, r, info), false
 }
 
 func (c *Gateway) fallbackServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) bool {
@@ -162,7 +151,7 @@ func (c *Gateway) serveCachedManifest(rw http.ResponseWriter, r *http.Request, i
 		return false
 	}
 
-	c.logger.Info("Manifest cache hit", "digest", digest)
+	c.logger.Info("Manifest cache hit", "host", info.Host, "image", info.Blobs, "manifest", info.Manifests, "digest", digest)
 	rw.Header().Set("Docker-Content-Digest", digest)
 	rw.Header().Set("Content-Type", mediaType)
 	rw.Header().Set("Content-Length", strconv.FormatInt(int64(len(content)), 10))

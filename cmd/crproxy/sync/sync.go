@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/daocloud/crproxy/cache"
@@ -17,13 +18,14 @@ import (
 )
 
 type flagpole struct {
-	StorageURL   []string
-	Deep         bool
-	List         []string
-	ListFromFile string
-	Platform     []string
-	MaxWarn      int
-	Userpass     []string
+	StorageURL        []string
+	Deep              bool
+	List              []string
+	ListFromFile      string
+	Platform          []string
+	MaxWarn           int
+	Userpass          []string
+	ExcludeTagsRegexp []string
 }
 
 func NewCommand() *cobra.Command {
@@ -44,13 +46,16 @@ func NewCommand() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringSliceVar(&flags.StorageURL, "storage-url", flags.StorageURL, "Storage driver url")
+	cmd.Flags().StringArrayVar(&flags.StorageURL, "storage-url", flags.StorageURL, "Storage driver url")
 	cmd.Flags().BoolVar(&flags.Deep, "deep", flags.Deep, "Deep sync")
-	cmd.Flags().StringSliceVar(&flags.List, "list", flags.List, "List")
+	cmd.Flags().StringArrayVar(&flags.List, "list", flags.List, "List")
 	cmd.Flags().StringVar(&flags.ListFromFile, "list-from-file", flags.ListFromFile, "List from file")
 	cmd.Flags().StringSliceVar(&flags.Platform, "platform", flags.Platform, "Platform")
 	cmd.Flags().IntVar(&flags.MaxWarn, "max-warn", flags.MaxWarn, "Max warn")
-	cmd.Flags().StringSliceVarP(&flags.Userpass, "user", "u", flags.Userpass, "host and username and password -u user:pwd@host")
+	cmd.Flags().StringArrayVarP(&flags.Userpass, "user", "u", flags.Userpass, "host and username and password -u user:pwd@host")
+
+	cmd.Flags().StringArrayVar(&flags.ExcludeTagsRegexp, "exclude-tags-regexp", flags.ExcludeTagsRegexp, "Exclude tags regexp")
+
 	return cmd
 }
 
@@ -99,6 +104,20 @@ func runE(ctx context.Context, flags *flagpole) error {
 		csync.WithLogger(logger),
 		csync.WithFilterPlatform(filterPlatform(flags.Platform)),
 	)
+
+	var excludeTags []*regexp.Regexp
+	if len(flags.ExcludeTagsRegexp) != 0 {
+		for _, t := range flags.ExcludeTagsRegexp {
+			r, err := regexp.Compile(t)
+			if err != nil {
+
+			}
+			excludeTags = append(excludeTags, r)
+		}
+		opts = append(opts,
+			csync.WithExcludeTags(excludeTags),
+		)
+	}
 
 	sm, err := csync.NewSyncManager(opts...)
 	if err != nil {

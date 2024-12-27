@@ -44,6 +44,7 @@ type SyncManager struct {
 	domainAlias map[string]string
 	deep        bool
 
+	excludeTags    []*regexp.Regexp
 	filterPlatform func(pf manifestlist.PlatformSpec) bool
 }
 
@@ -96,6 +97,12 @@ func WithFilterPlatform(filterPlatform func(pf manifestlist.PlatformSpec) bool) 
 	}
 }
 
+func WithExcludeTags(excludeTags []*regexp.Regexp) Option {
+	return func(c *SyncManager) {
+		c.excludeTags = excludeTags
+	}
+}
+
 func NewSyncManager(opts ...Option) (*SyncManager, error) {
 	c := &SyncManager{
 		logger:    slog.Default(),
@@ -113,18 +120,27 @@ func NewSyncManager(opts ...Option) (*SyncManager, error) {
 }
 
 func (c *SyncManager) Image(ctx context.Context, image string) error {
-	var regexTag string
+	var regexTag *regexp.Regexp
 	ref, err := reference.Parse(image)
 	if err != nil {
 		parts := strings.SplitN(image, ":", 2)
-		if len(parts) == 2 {
-			image = parts[0]
+		if len(parts) != 2 {
+			return fmt.Errorf("parse image %q failed: %w", image, err)
 		}
-		ref, err = reference.Parse(image)
+
+		ref, err = reference.Parse(parts[0])
 		if err != nil {
-			return fmt.Errorf("parse image failed: %w", err)
+			return fmt.Errorf("parse image %q failed: %w", image, err)
 		}
-		regexTag = parts[1]
+
+		image = parts[0]
+
+		if parts[1] != "" {
+			regexTag, err = regexp.Compile(parts[1])
+			if err != nil {
+				return fmt.Errorf("compile regex failed: %w", err)
+			}
+		}
 	}
 
 	named, ok := ref.(reference.Named)
@@ -261,18 +277,20 @@ func (c *SyncManager) Image(ctx context.Context, image string) error {
 			return fmt.Errorf("get tags failed: %w", err)
 		}
 
-		var regex *regexp.Regexp
-		if regexTag != "" {
-			regex, err = regexp.Compile(regexTag)
-			if err != nil {
-				return fmt.Errorf("compile regex failed: %w", err)
-			}
-		}
-
+	loop:
 		for _, tag := range tags {
-			if regex != nil && !regex.MatchString(tag) {
+			if regexTag != nil && !regexTag.MatchString(tag) {
 				c.logger.Info("skip manifest by filter tag", "image", image, "tag", tag)
 				continue
+			}
+
+			if len(c.excludeTags) != 0 {
+				for _, reg := range c.excludeTags {
+					if reg.MatchString(tag) {
+						c.logger.Info("skip manifest by filter exclude tag", "image", image, "tag", tag)
+						continue loop
+					}
+				}
 			}
 			t, err := reference.WithTag(name, tag)
 			if err != nil {

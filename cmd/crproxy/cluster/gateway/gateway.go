@@ -47,6 +47,8 @@ type flagpole struct {
 
 	DefaultRegistry         string
 	OverrideDefaultRegistry map[string]string
+
+	RegistryAlias map[string]string
 }
 
 func NewCommand() *cobra.Command {
@@ -86,7 +88,7 @@ func NewCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.DefaultRegistry, "default-registry", flags.DefaultRegistry, "default registry used for non full-path docker pull, like:docker.io")
 	cmd.Flags().StringToStringVar(&flags.OverrideDefaultRegistry, "override-default-registry", flags.OverrideDefaultRegistry, "override default registry")
-
+	cmd.Flags().StringToStringVar(&flags.RegistryAlias, "registry-alias", flags.RegistryAlias, "registry alias")
 	return cmd
 }
 
@@ -103,6 +105,13 @@ func runE(ctx context.Context, flags *flagpole) error {
 		gateway.WithDefaultRegistry(flags.DefaultRegistry),
 		gateway.WithOverrideDefaultRegistry(flags.OverrideDefaultRegistry),
 		gateway.WithPathInfoModifyFunc(func(info *gateway.ImageInfo) *gateway.ImageInfo {
+			if len(flags.RegistryAlias) != 0 {
+				h, ok := flags.RegistryAlias[info.Host]
+				if ok {
+					info.Host = h
+				}
+			}
+
 			if info.Host == "docker.io" {
 				info.Host = "registry-1.docker.io"
 			} else if info.Host == "ollama.ai" {

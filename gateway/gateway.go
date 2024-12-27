@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -14,6 +13,7 @@ import (
 	"github.com/daocloud/crproxy/agent"
 	"github.com/daocloud/crproxy/cache"
 	"github.com/daocloud/crproxy/internal/maps"
+	"github.com/daocloud/crproxy/internal/utils"
 	"github.com/daocloud/crproxy/token"
 	"github.com/docker/distribution/registry/api/errcode"
 	"github.com/wzshiming/geario"
@@ -150,31 +150,6 @@ func NewGateway(opts ...Option) (*Gateway, error) {
 	return c, nil
 }
 
-func apiBase(w http.ResponseWriter, r *http.Request) {
-	const emptyJSON = "{}"
-	// Provide a simple /v2/ 200 OK response with empty json response.
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Length", fmt.Sprint(len(emptyJSON)))
-
-	fmt.Fprint(w, emptyJSON)
-}
-
-func emptyTagsList(w http.ResponseWriter, r *http.Request) {
-	const emptyTagsList = `{"name":"disable-list-tags","tags":[]}`
-
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Length", fmt.Sprint(len(emptyTagsList)))
-	fmt.Fprint(w, emptyTagsList)
-}
-
-func getIP(str string) string {
-	host, _, err := net.SplitHostPort(str)
-	if err == nil && host != "" {
-		return host
-	}
-	return str
-}
-
 func (c *Gateway) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	oriPath := r.URL.Path
 	if !strings.HasPrefix(oriPath, prefix) {
@@ -192,7 +167,7 @@ func (c *Gateway) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.RemoteAddr = getIP(r.RemoteAddr)
+	r.RemoteAddr = utils.GetIP(r.RemoteAddr)
 
 	var t token.Token
 	var err error
@@ -208,7 +183,7 @@ func (c *Gateway) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	if oriPath == prefix {
-		apiBase(rw, r)
+		utils.ResponseAPIBase(rw, r)
 		return
 	}
 
@@ -265,7 +240,7 @@ func (c *Gateway) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	if c.disableTagsList && info.TagsList && !t.AllowTagsList {
-		emptyTagsList(rw, r)
+		utils.ResponseEmptyTagsList(rw, r)
 		return
 	}
 

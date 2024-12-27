@@ -12,8 +12,13 @@ import (
 	"time"
 
 	"github.com/daocloud/crproxy/cache"
+	"github.com/daocloud/crproxy/internal/utils"
 	"github.com/daocloud/crproxy/token"
 	"github.com/docker/distribution/registry/api/errcode"
+)
+
+var (
+	prefix = "/v2/"
 )
 
 type BlobInfo struct {
@@ -86,7 +91,7 @@ func NewAgent(opts ...Option) (*Agent, error) {
 // /v2/{source}/{path...}/blobs/sha256:{digest}
 
 func parsePath(path string) (string, string, string, bool) {
-	path = strings.TrimPrefix(path, "/v2/")
+	path = strings.TrimPrefix(path, prefix)
 	parts := strings.Split(path, "/")
 	if len(parts) < 4 {
 		return "", "", "", false
@@ -104,6 +109,22 @@ func parsePath(path string) (string, string, string, bool) {
 }
 
 func (c *Agent) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	oriPath := r.URL.Path
+	if !strings.HasPrefix(oriPath, prefix) {
+		http.NotFound(rw, r)
+		return
+	}
+
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		errcode.ServeJSON(rw, errcode.ErrorCodeUnsupported)
+		return
+	}
+
+	if oriPath == prefix {
+		utils.ResponseAPIBase(rw, r)
+		return
+	}
+
 	source, image, digest, ok := parsePath(r.URL.Path)
 	if !ok {
 		http.NotFound(rw, r)

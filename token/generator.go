@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/daocloud/crproxy/internal/utils"
 	"github.com/docker/distribution/registry/api/errcode"
 )
 
@@ -65,14 +65,6 @@ func (g *Generator) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func getIP(str string) string {
-	host, _, err := net.SplitHostPort(str)
-	if err == nil && host != "" {
-		return host
-	}
-	return str
-}
-
 func (g *Generator) getToken(r *http.Request) (*Token, error) {
 	query := r.URL.Query()
 	account := query.Get("account")
@@ -83,7 +75,7 @@ func (g *Generator) getToken(r *http.Request) (*Token, error) {
 		Service: service,
 		Scope:   scope,
 		Account: account,
-		IP:      getIP(r.RemoteAddr),
+		IP:      utils.GetIP(r.RemoteAddr),
 	}
 
 	if scope != "" {

@@ -252,12 +252,14 @@ func (c *Agent) cacheBlob(info *BlobInfo, stats func(int64)) (int64, error) {
 	}
 	forwardReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u.String(), nil)
 	if err != nil {
+		c.logger.Warn("failed to new request", "url", u.String(), "error", err)
 		return 0, err
 	}
 
 	resp, err := c.httpClient.Do(forwardReq)
 	if err != nil {
-		return 0, err
+		c.logger.Warn("failed to request", "url", u.String(), "error", err)
+		return 0, errcode.ErrorCodeUnknown
 	}
 	defer func() {
 		resp.Body.Close()

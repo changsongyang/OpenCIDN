@@ -44,6 +44,9 @@ type flagpole struct {
 	ReadmeURL string
 
 	BlobsLENoAgent int
+
+	DefaultRegistry         string
+	OverrideDefaultRegistry map[string]string
 }
 
 func NewCommand() *cobra.Command {
@@ -80,6 +83,10 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.ReadmeURL, "readme-url", flags.ReadmeURL, "Readme url")
 
 	cmd.Flags().IntVar(&flags.BlobsLENoAgent, "blobs-le-no-agent", flags.BlobsLENoAgent, "Less than or equal to No Agent")
+
+	cmd.Flags().StringVar(&flags.DefaultRegistry, "default-registry", flags.DefaultRegistry, "default registry used for non full-path docker pull, like:docker.io")
+	cmd.Flags().StringToStringVar(&flags.OverrideDefaultRegistry, "override-default-registry", flags.OverrideDefaultRegistry, "override default registry")
+
 	return cmd
 }
 
@@ -93,6 +100,8 @@ func runE(ctx context.Context, flags *flagpole) error {
 	opts = append(opts,
 		gateway.WithLogger(logger),
 		gateway.WithBlobsLENoAgent(flags.BlobsLENoAgent),
+		gateway.WithDefaultRegistry(flags.DefaultRegistry),
+		gateway.WithOverrideDefaultRegistry(flags.OverrideDefaultRegistry),
 		gateway.WithPathInfoModifyFunc(func(info *gateway.ImageInfo) *gateway.ImageInfo {
 			if info.Host == "docker.io" {
 				info.Host = "registry-1.docker.io"

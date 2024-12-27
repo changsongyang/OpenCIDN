@@ -39,6 +39,9 @@ type Gateway struct {
 	manifestCacheDuration time.Duration
 	authenticator         *token.Authenticator
 
+	defaultRegistry         string
+	overrideDefaultRegistry map[string]string
+
 	acceptsItems []string
 	accepts      map[string]struct{}
 
@@ -97,6 +100,18 @@ func WithBlobsLENoAgent(blobsLENoAgent int) Option {
 	}
 }
 
+func WithDefaultRegistry(target string) Option {
+	return func(c *Gateway) {
+		c.defaultRegistry = target
+	}
+}
+
+func WithOverrideDefaultRegistry(overrideDefaultRegistry map[string]string) Option {
+	return func(c *Gateway) {
+		c.overrideDefaultRegistry = overrideDefaultRegistry
+	}
+}
+
 func NewGateway(opts ...Option) (*Gateway, error) {
 	c := &Gateway{
 		logger: slog.Default(),
@@ -115,10 +130,6 @@ func NewGateway(opts ...Option) (*Gateway, error) {
 
 	for _, opt := range opts {
 		opt(c)
-	}
-
-	if c.authenticator == nil {
-		return nil, fmt.Errorf("no authenticator provided")
 	}
 
 	if c.cache != nil {
@@ -223,6 +234,17 @@ func (c *Gateway) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	if t.Attribute.Host != "" {
 		info.Host = t.Attribute.Host
 	}
+
+	if info.Host == "" {
+		info.Host = c.defaultRegistry
+		if c.overrideDefaultRegistry != nil {
+			r, ok := c.overrideDefaultRegistry[r.Host]
+			if ok {
+				info.Host = r
+			}
+		}
+	}
+
 	if info.Host == "" {
 		errcode.ServeJSON(rw, errcode.ErrorCodeDenied)
 		return

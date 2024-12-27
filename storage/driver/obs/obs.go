@@ -135,18 +135,18 @@ type Driver struct {
 
 // FromParameters constructs a new Driver with a given parameters map
 // Required parameters:
-// - accesskeyid
-// - accesskeysecret
+// - accesskey
+// - secretkey
 // - region
 // - bucket
 // - encrypt
 func FromParameters(parameters map[string]interface{}) (*Driver, error) {
 	// Providing no values for these is valid in case the user is authenticating
-	accessKey, ok := parameters["accesskeyid"]
+	accessKey, ok := parameters["accesskey"]
 	if !ok {
-		return nil, fmt.Errorf("No accesskeyid parameter provided")
+		return nil, fmt.Errorf("No accesskey parameter provided")
 	}
-	secretKey, ok := parameters["accesskeysecret"]
+	secretKey, ok := parameters["secretkey"]
 	if !ok {
 		return nil, fmt.Errorf("No accesskeysecret parameter provided")
 	}

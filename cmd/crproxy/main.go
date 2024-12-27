@@ -10,8 +10,6 @@ import (
 
 	_ "github.com/daocloud/crproxy/storage/driver/obs"
 	_ "github.com/daocloud/crproxy/storage/driver/oss"
-	_ "github.com/docker/distribution/registry/storage/driver/azure"
-	_ "github.com/docker/distribution/registry/storage/driver/gcs"
 	_ "github.com/docker/distribution/registry/storage/driver/s3-aws"
 )
 

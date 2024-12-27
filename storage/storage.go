@@ -24,12 +24,12 @@ func NewStorage(uri string) (StorageDriver, error) {
 	}
 
 	if u.User != nil {
-		parameters["accesskeyid"] = u.User.Username()
-		parameters["accesskeysecret"], _ = u.User.Password()
+		parameters["accesskey"] = u.User.Username()
+		parameters["secretkey"], _ = u.User.Password()
 	}
 
 	if u.Host != "" {
-		part := strings.Split(u.Host, ".")
+		part := strings.SplitN(u.Host, ".", 2)
 		if len(part) != 2 {
 			return nil, fmt.Errorf("invalid host %q", u.Host)
 		}

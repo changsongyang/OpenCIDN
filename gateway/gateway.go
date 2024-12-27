@@ -226,6 +226,15 @@ func (c *Gateway) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		errcode.ServeJSON(rw, errcode.ErrorCodeDenied)
 		return
 	}
+
+	if r.URL.RawQuery != "" {
+		q := r.URL.Query()
+		if ns := q.Get("ns"); ns != "" && ns != info.Host {
+			errcode.ServeJSON(rw, errcode.ErrorCodeDenied)
+			return
+		}
+	}
+
 	if t.Attribute.Image != "" {
 		info.Image = t.Attribute.Image
 	}

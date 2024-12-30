@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -316,8 +317,8 @@ func (c *Agent) errorResponse(rw http.ResponseWriter, r *http.Request, err error
 }
 
 func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, size int64) {
-	if int64(c.blobsLENoAgent) > size {
-		data, err := c.cache.GetBlobContent(r.Context(), info.Blobs)
+	if c.blobsLENoAgent < 0 || int64(c.blobsLENoAgent) > size {
+		data, err := c.cache.GetBlob(r.Context(), info.Blobs)
 		if err != nil {
 			c.logger.Error("failed to get blob", "digest", info.Blobs, "error", err)
 			c.errorResponse(rw, r, err)
@@ -325,7 +326,7 @@ func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob
 		}
 		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 		rw.Header().Set("Content-Type", "application/octet-stream")
-		rw.Write(data)
+		io.Copy(rw, data)
 		return
 	}
 

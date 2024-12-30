@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/textproto"
 	"net/url"
 	"strconv"
 	"time"
@@ -20,32 +19,71 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	reqCtx := r.Context()
+	err := c.cacheManifest(context.Background(), info)
+	if err != nil {
+		if fallback && c.fallbackServeCachedManifest(rw, r, info) {
+			c.logger.Warn("failed to request, but hit caches", "error", err)
+			return
+		}
+		errcode.ServeJSON(rw, err)
+		return
+	}
 
+	if c.serveCachedManifest(rw, r, info) {
+		return
+	}
+
+	errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
+}
+
+func (c *Gateway) cacheManifest(ctx context.Context, info *PathInfo) error {
 	u := &url.URL{
 		Scheme: "https",
 		Host:   info.Host,
 		Path:   fmt.Sprintf("/v2/%s/manifests/%s", info.Image, info.Manifests),
 	}
-	forwardReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		c.logger.Error("failed to new request", "error", err)
-		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
-		return
+
+	if !info.IsDigestManifests {
+		forwardReq, err := http.NewRequestWithContext(ctx, http.MethodHead, u.String(), nil)
+		if err != nil {
+			return err
+		}
+		// Never trust a client's Accept !!!
+		forwardReq.Header.Set("Accept", c.acceptsStr)
+
+		resp, err := c.httpClient.Do(forwardReq)
+		if err != nil {
+			return err
+		}
+		if resp.Body != nil {
+			resp.Body.Close()
+		}
+		if resp.StatusCode == http.StatusOK {
+			digest := resp.Header.Get("Docker-Content-Digest")
+			if digest != "" {
+				err = c.cache.RelinkManifest(ctx, info.Host, info.Image, info.Manifests, digest)
+				if err != nil {
+					c.logger.Warn("failed relink manifest", "url", u.String(), "error", err)
+				} else {
+					c.logger.Info("relink manifest", "url", u.String())
+					return nil
+				}
+			}
+			u.Path = fmt.Sprintf("/v2/%s/manifests/%s", info.Image, digest)
+		}
 	}
 
+	forwardReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return err
+	}
 	// Never trust a client's Accept !!!
 	forwardReq.Header.Set("Accept", c.acceptsStr)
 
 	resp, err := c.httpClient.Do(forwardReq)
 	if err != nil {
-		if fallback && c.fallbackServeCachedManifest(rw, r, info) {
-			c.logger.Warn("failed to request, but hit caches", "url", u.String(), "error", err)
-			return
-		}
-		c.logger.Error("failed to request", "url", u.String(), "error", err)
-		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
-		return
+		c.logger.Warn("failed to request", "url", u.String(), "error", err)
+		return errcode.ErrorCodeUnknown
 	}
 	defer func() {
 		resp.Body.Close()
@@ -53,63 +91,36 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 
 	switch resp.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
-		if fallback && c.fallbackServeCachedManifest(rw, r, info) {
-			c.logger.Warn("origin manifest response, but hit caches", "statusCode", resp.StatusCode, "url", u.String(), "response", dumpResponse(resp))
-			return
-		}
-		c.logger.Error("origin manifest response", "statusCode", resp.StatusCode, "url", u.String(), "response", dumpResponse(resp))
-		errcode.ServeJSON(rw, errcode.ErrorCodeDenied)
-		return
+		c.logger.Error("upstream denied", "statusCode", resp.StatusCode, "url", u.String(), "response", dumpResponse(resp))
+		return errcode.ErrorCodeDenied
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.logger.Error("failed to get body", "statusCode", resp.StatusCode, "url", u.String(), "error", err)
+		return errcode.ErrorCodeUnknown
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		if fallback && c.fallbackServeCachedManifest(rw, r, info) {
-			c.logger.Warn("origin manifest response, but hit caches", "statusCode", resp.StatusCode, "url", u.String(), "response", dumpResponse(resp))
-			return
-		}
-		c.logger.Error("origin manifest response", "statusCode", resp.StatusCode, "url", u.String())
-	}
-
-	resp.Header.Del("Docker-Ratelimit-Source")
-
-	header := rw.Header()
-	for k, v := range resp.Header {
-		key := textproto.CanonicalMIMEHeaderKey(k)
-		header[key] = v
-	}
-
-	rw.WriteHeader(resp.StatusCode)
-
-	needCache := resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices
-	if !info.IsDigestManifests {
-		_, ok := c.accepts[resp.Header.Get("Content-Type")]
-		needCache = needCache && ok
-	}
-	if needCache {
-		body, err := io.ReadAll(resp.Body)
+		var retErrs errcode.Errors
+		err = retErrs.UnmarshalJSON(body)
 		if err != nil {
-			c.errorResponse(rw, r, err)
-			return
+			output := body
+			if len(output) > 1024 {
+				output = output[:1024]
+			}
+			c.logger.Error("failed to unmarshal body", "url", "statusCode", resp.StatusCode, u.String(), "body", string(output))
+			return errcode.ErrorCodeUnknown
 		}
-
-		_, _, err = c.cache.PutManifestContent(context.Background(), info.Host, info.Image, info.Manifests, body)
-		if err != nil {
-			c.errorResponse(rw, r, err)
-			return
-		}
-
-		if r.Method == http.MethodHead {
-			return
-		}
-
-		rw.Write(body)
-	} else {
-		if r.Method == http.MethodHead {
-			return
-		}
-
-		io.Copy(rw, resp.Body)
+		return retErrs
 	}
+
+	_, _, err = c.cache.PutManifestContent(ctx, info.Host, info.Image, info.Manifests, body)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) (done bool, fallback bool) {
@@ -140,7 +151,7 @@ func (c *Gateway) serveCachedManifest(rw http.ResponseWriter, r *http.Request, i
 
 	content, digest, mediaType, err := c.cache.GetManifestContent(ctx, info.Host, info.Image, info.Manifests)
 	if err != nil {
-		c.logger.Error("Manifest cache missed", "error", err)
+		c.logger.Warn("Manifest cache missed", "host", info.Host, "image", info.Blobs, "manifest", info.Manifests, "digest", digest, "error", err)
 		return false
 	}
 

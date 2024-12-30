@@ -10,6 +10,29 @@ import (
 	"strings"
 )
 
+func (c *Cache) RelinkManifest(ctx context.Context, host, image, tag string, blob string) error {
+	blob = cleanDigest(blob)
+
+	_, err := c.StatBlob(ctx, blob)
+	if err != nil {
+		return err
+	}
+
+	manifestLinkPath := manifestTagCachePath(host, image, tag)
+	err = c.PutContent(ctx, manifestLinkPath, []byte("sha256:"+blob))
+	if err != nil {
+		return fmt.Errorf("put manifest link path %s error: %w", manifestLinkPath, err)
+	}
+
+	manifestBlobLinkPath := manifestRevisionsCachePath(host, image, blob)
+	err = c.PutContent(ctx, manifestBlobLinkPath, []byte("sha256:"+blob))
+	if err != nil {
+		return fmt.Errorf("put manifest revisions path %s error: %w", manifestLinkPath, err)
+	}
+
+	return nil
+}
+
 func (c *Cache) PutManifestContent(ctx context.Context, host, image, tagOrBlob string, content []byte) (int64, string, error) {
 	h := sha256.New()
 	h.Write(content)
@@ -77,10 +100,11 @@ func (c *Cache) GetManifestContent(ctx context.Context, host, image, tagOrBlob s
 	return content, digest, mediaType, nil
 }
 
-func manifestRevisionsCachePath(host, image, tagOrBlob string) string {
-	return path.Join("/docker/registry/v2/repositories", host, image, "_manifests/revisions/sha256", tagOrBlob, "link")
+func manifestRevisionsCachePath(host, image, blob string) string {
+	blob = cleanDigest(blob)
+	return path.Join("/docker/registry/v2/repositories", host, image, "_manifests/revisions/sha256", blob, "link")
 }
 
-func manifestTagCachePath(host, image, tagOrBlob string) string {
-	return path.Join("/docker/registry/v2/repositories", host, image, "_manifests/tags", tagOrBlob, "current/link")
+func manifestTagCachePath(host, image, tag string) string {
+	return path.Join("/docker/registry/v2/repositories", host, image, "_manifests/tags", tag, "current/link")
 }

@@ -16,6 +16,11 @@ import (
 func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request, info *PathInfo, t *token.Token) {
 	ctx := r.Context()
 
+	done, fallback := c.tryFirstServeCachedManifest(rw, r, info)
+	if done {
+		return
+	}
+
 	key := manifestCacheKey(info)
 	closeValue, loaded := c.mutCache.LoadOrStore(key, make(chan struct{}))
 	closeCh := closeValue.(chan struct{})
@@ -37,7 +42,7 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 		close(closeCh)
 	}
 
-	done, fallback := c.tryFirstServeCachedManifest(rw, r, info)
+	done, fallback = c.tryFirstServeCachedManifest(rw, r, info)
 	if done {
 		doneCache()
 		return
@@ -50,7 +55,6 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 
 	go func() {
 		defer doneCache()
-
 		err := c.cacheManifest(context.Background(), info)
 		if err != nil {
 			if fallback && c.fallbackServeCachedManifest(rw, r, info) {
@@ -174,7 +178,11 @@ func (c *Gateway) cacheManifest(ctx context.Context, info *PathInfo) error {
 }
 
 func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) (done bool, fallback bool) {
-	if !info.IsDigestManifests && c.manifestCacheDuration > 0 {
+	if c.manifestCacheDuration == 0 {
+		return false, true
+	}
+
+	if !info.IsDigestManifests {
 		last, ok := c.manifestCache.Load(manifestCacheKey(info))
 		if !ok {
 			return false, true

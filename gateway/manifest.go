@@ -34,15 +34,8 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	if forwardReq.Header == nil {
-		forwardReq.Header = map[string][]string{}
-	}
-
-	if info.IsDigestManifests {
-		forwardReq.Header.Set("Accept", r.Header.Get("Accept"))
-	} else {
-		forwardReq.Header.Set("Accept", c.acceptsStr)
-	}
+	// Never trust a client's Accept !!!
+	forwardReq.Header.Set("Accept", c.acceptsStr)
 
 	resp, err := c.httpClient.Do(forwardReq)
 	if err != nil {

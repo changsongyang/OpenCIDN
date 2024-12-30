@@ -14,26 +14,76 @@ import (
 )
 
 func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request, info *PathInfo, t *token.Token) {
+	ctx := r.Context()
+
+	key := manifestCacheKey(info)
+	closeValue, loaded := c.mutCache.LoadOrStore(key, make(chan struct{}))
+	closeCh := closeValue.(chan struct{})
+	for loaded {
+		select {
+		case <-ctx.Done():
+			err := ctx.Err().Error()
+			c.logger.Warn("context done", "error", err)
+			http.Error(rw, err, http.StatusInternalServerError)
+			return
+		case <-closeCh:
+		}
+		closeValue, loaded = c.mutCache.LoadOrStore(key, make(chan struct{}))
+		closeCh = closeValue.(chan struct{})
+	}
+
+	doneCache := func() {
+		c.mutCache.Delete(key)
+		close(closeCh)
+	}
+
 	done, fallback := c.tryFirstServeCachedManifest(rw, r, info)
 	if done {
+		doneCache()
 		return
 	}
 
-	err := c.cacheManifest(context.Background(), info)
-	if err != nil {
-		if fallback && c.fallbackServeCachedManifest(rw, r, info) {
-			c.logger.Warn("failed to request, but hit caches", "error", err)
+	type signal struct {
+		err error
+	}
+	signalCh := make(chan signal, 1)
+
+	go func() {
+		defer doneCache()
+
+		err := c.cacheManifest(context.Background(), info)
+		if err != nil {
+			if fallback && c.fallbackServeCachedManifest(rw, r, info) {
+				c.logger.Warn("failed to request, but hit caches", "error", err)
+				signalCh <- signal{
+					err: nil,
+				}
+				return
+			}
+		}
+		signalCh <- signal{
+			err: err,
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		c.errorResponse(rw, r, ctx.Err())
+		return
+	case signal := <-signalCh:
+		if signal.err != nil {
+			c.errorResponse(rw, r, signal.err)
 			return
 		}
-		errcode.ServeJSON(rw, err)
+
+		if c.serveCachedManifest(rw, r, info) {
+			return
+		}
+
+		c.logger.Error("should not be executed", "url", r.URL.String())
+		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
 		return
 	}
-
-	if c.serveCachedManifest(rw, r, info) {
-		return
-	}
-
-	errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
 }
 
 func (c *Gateway) cacheManifest(ctx context.Context, info *PathInfo) error {

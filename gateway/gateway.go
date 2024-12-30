@@ -8,6 +8,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/daocloud/crproxy/agent"
@@ -30,6 +31,7 @@ type ImageInfo struct {
 }
 
 type Gateway struct {
+	mutCache              sync.Map
 	httpClient            *http.Client
 	modify                func(info *ImageInfo) *ImageInfo
 	logger                *slog.Logger

@@ -56,7 +56,10 @@ func NewTransport(opts ...Option) (http.RoundTripper, error) {
 	}
 
 	for _, opt := range opts {
-		opt(c)
+		err := opt(c)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return c, nil
@@ -169,7 +172,7 @@ func toUserAndPass(userpass []string) (map[string]authn.AuthConfig, error) {
 		}
 
 		u := strings.SplitN(s[0], ":", 3)
-		if len(s) != 2 {
+		if len(u) != 2 {
 			return nil, fmt.Errorf("invalid userpass %q", up)
 		}
 		host := s[1]

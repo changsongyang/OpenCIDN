@@ -130,6 +130,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 	}
 
 	transportOpts := []transport.Option{
+		transport.WithUserAndPass(flags.Userpass),
 		transport.WithLogger(logger),
 	}
 

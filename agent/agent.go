@@ -324,6 +324,7 @@ func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob
 			c.errorResponse(rw, r, err)
 			return
 		}
+		defer data.Close()
 		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 		rw.Header().Set("Content-Type", "application/octet-stream")
 		io.Copy(rw, data)

@@ -38,6 +38,7 @@ func (c *Cache) GetBlobContent(ctx context.Context, blob string) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
+	defer r.Close()
 	return io.ReadAll(r)
 }
 

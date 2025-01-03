@@ -24,7 +24,8 @@ import (
 type flagpole struct {
 	StorageURL string
 
-	ManifestCacheDuration time.Duration
+	ManifestCacheDuration  time.Duration
+	RecacheMaxWaitDuration time.Duration
 
 	Userpass        []string
 	Retry           int
@@ -66,6 +67,7 @@ func NewCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.StorageURL, "storage-url", flags.StorageURL, "Storage driver url")
 	cmd.Flags().DurationVar(&flags.ManifestCacheDuration, "manifest-cache-duration", flags.ManifestCacheDuration, "Manifest cache duration")
+	cmd.Flags().DurationVar(&flags.RecacheMaxWaitDuration, "recache-max-wait-duration", flags.RecacheMaxWaitDuration, "Recache max wait duration")
 
 	cmd.Flags().StringSliceVarP(&flags.Userpass, "user", "u", flags.Userpass, "host and username and password -u user:pwd@host")
 	cmd.Flags().IntVar(&flags.Retry, "retry", flags.Retry, "Retry")
@@ -145,6 +147,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		}
 		opts = append(opts, gateway.WithCache(cache))
 		opts = append(opts, gateway.WithManifestCacheDuration(flags.ManifestCacheDuration))
+		opts = append(opts, gateway.WithRecacheMaxWait(flags.RecacheMaxWaitDuration))
 	}
 
 	if flags.TokenPublicKeyFile != "" {

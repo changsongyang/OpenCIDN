@@ -100,6 +100,28 @@ func (c *Cache) GetManifestContent(ctx context.Context, host, image, tagOrBlob s
 	return content, digest, mediaType, nil
 }
 
+func (c *Cache) StatManifest(ctx context.Context, host, image, tagOrBlob string) (bool, error) {
+	var manifestLinkPath string
+	isHash := strings.HasPrefix(tagOrBlob, "sha256:")
+	if isHash {
+		manifestLinkPath = manifestRevisionsCachePath(host, image, tagOrBlob[7:])
+	} else {
+		manifestLinkPath = manifestTagCachePath(host, image, tagOrBlob)
+	}
+
+	digestContent, err := c.GetContent(ctx, manifestLinkPath)
+	if err != nil {
+		return false, fmt.Errorf("get manifest link path %s error: %w", manifestLinkPath, err)
+	}
+	digest := string(digestContent)
+	stat, err := c.StatBlob(ctx, digest)
+	if err != nil {
+		return false, err
+	}
+
+	return stat.Size() != 0, nil
+}
+
 func manifestRevisionsCachePath(host, image, blob string) string {
 	blob = cleanDigest(blob)
 	return path.Join("/docker/registry/v2/repositories", host, image, "_manifests/revisions/sha256", blob, "link")

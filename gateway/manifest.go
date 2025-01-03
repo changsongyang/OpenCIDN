@@ -7,14 +7,16 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 
-	"github.com/daocloud/crproxy/token"
 	"github.com/docker/distribution/registry/api/errcode"
 )
 
-func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request, info *PathInfo, t *token.Token) {
+func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request, info *PathInfo) {
 	ctx := r.Context()
+
+	if c.manifestCache != nil {
+		c.manifestCache.Evict(info)
+	}
 
 	done, fallback := c.tryFirstServeCachedManifest(rw, r, info)
 	if done {
@@ -57,21 +59,42 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 		defer doneCache()
 		err := c.cacheManifest(context.Background(), info)
 		if err != nil {
-			if fallback && c.fallbackServeCachedManifest(rw, r, info) {
+			if fallback {
 				c.logger.Warn("failed to request, but hit caches", "error", err)
 				signalCh <- signal{
 					err: nil,
 				}
 				return
 			}
+			if c.manifestCache != nil {
+				c.manifestCache.PutError(info, err)
+			}
+			c.logger.Error("failed to request", "error", err)
 		}
 		signalCh <- signal{
 			err: err,
 		}
 	}()
 
+	var hasCache bool
+
+	if c.recacheMaxWait > 0 {
+		hasCache = c.checkCachedManifest(rw, r, info)
+		if hasCache {
+			var cancel func()
+			ctx, cancel = context.WithTimeout(ctx, c.recacheMaxWait)
+			defer cancel()
+		}
+	}
+
 	select {
 	case <-ctx.Done():
+		if hasCache {
+			c.logger.Warn("failed to request, but hit caches", "error", ctx.Err())
+			if c.serveCachedManifest(rw, r, info) {
+				return
+			}
+		}
 		c.errorResponse(rw, r, ctx.Err())
 		return
 	case signal := <-signalCh:
@@ -163,7 +186,7 @@ func (c *Gateway) cacheManifest(ctx context.Context, info *PathInfo) error {
 			if len(output) > 1024 {
 				output = output[:1024]
 			}
-			c.logger.Error("failed to unmarshal body", "url", "statusCode", resp.StatusCode, u.String(), "body", string(output))
+			c.logger.Error("failed to unmarshal body", "statusCode", resp.StatusCode, "url", u.String(), "body", string(output))
 			return errcode.ErrorCodeUnknown
 		}
 		return retErrs
@@ -178,30 +201,32 @@ func (c *Gateway) cacheManifest(ctx context.Context, info *PathInfo) error {
 }
 
 func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) (done bool, fallback bool) {
-	if c.manifestCacheDuration == 0 {
-		return false, true
+	if c.manifestCache == nil {
+		return c.serveCachedManifest(rw, r, info), false
 	}
 
-	if !info.IsDigestManifests {
-		last, ok := c.manifestCache.Load(manifestCacheKey(info))
-		if !ok {
-			return false, true
-		}
+	val, ok := c.manifestCache.Get(info)
+	if !ok {
+		return false, true
+	}
+	if val.Error != nil {
+		errcode.ServeJSON(rw, val.Error)
+		return true, false
+	}
 
-		if time.Since(last) > c.manifestCacheDuration {
-			return false, true
-		}
+	if r.Method == http.MethodHead {
+		rw.Header().Set("Docker-Content-Digest", val.Digest)
+		rw.Header().Set("Content-Type", val.MediaType)
+		rw.Header().Set("Content-Length", val.Length)
+		return true, false
 	}
 
 	return c.serveCachedManifest(rw, r, info), false
 }
 
-func (c *Gateway) fallbackServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) bool {
-	if info.IsDigestManifests {
-		return false
-	}
-
-	return c.serveCachedManifest(rw, r, info)
+func (c *Gateway) checkCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) bool {
+	ok, _ := c.cache.StatManifest(r.Context(), info.Host, info.Image, info.Manifests)
+	return ok
 }
 
 func (c *Gateway) serveCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) bool {
@@ -214,29 +239,22 @@ func (c *Gateway) serveCachedManifest(rw http.ResponseWriter, r *http.Request, i
 	}
 
 	c.logger.Info("Manifest cache hit", "host", info.Host, "image", info.Blobs, "manifest", info.Manifests, "digest", digest)
+
+	length := strconv.FormatInt(int64(len(content)), 10)
 	rw.Header().Set("Docker-Content-Digest", digest)
 	rw.Header().Set("Content-Type", mediaType)
-	rw.Header().Set("Content-Length", strconv.FormatInt(int64(len(content)), 10))
+	rw.Header().Set("Content-Length", length)
+
 	if r.Method != http.MethodHead {
 		rw.Write(content)
 	}
 
-	if c.manifestCacheDuration > 0 && !info.IsDigestManifests {
-		c.manifestCache.Store(manifestCacheKey(info), time.Now())
+	if c.manifestCache != nil {
+		c.manifestCache.Put(info, cacheValue{
+			Digest:    digest,
+			MediaType: mediaType,
+			Length:    length,
+		})
 	}
 	return true
-}
-
-type cacheKey struct {
-	Host  string
-	Image string
-	Tag   string
-}
-
-func manifestCacheKey(info *PathInfo) cacheKey {
-	return cacheKey{
-		Host:  info.Host,
-		Image: info.Image,
-		Tag:   info.Manifests,
-	}
 }

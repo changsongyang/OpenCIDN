@@ -18,102 +18,51 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 		c.manifestCache.Evict(info)
 	}
 
-	done, fallback := c.tryFirstServeCachedManifest(rw, r, info)
-	if done {
-		return
-	}
-
-	key := manifestCacheKey(info)
-	closeValue, loaded := c.mutCache.LoadOrStore(key, make(chan struct{}))
-	closeCh := closeValue.(chan struct{})
-	for loaded {
-		select {
-		case <-ctx.Done():
-			err := ctx.Err().Error()
-			c.logger.Warn("context done", "error", err)
-			http.Error(rw, err, http.StatusInternalServerError)
-			return
-		case <-closeCh:
-		}
-		closeValue, loaded = c.mutCache.LoadOrStore(key, make(chan struct{}))
-		closeCh = closeValue.(chan struct{})
-	}
-
-	doneCache := func() {
-		c.mutCache.Delete(key)
-		close(closeCh)
-	}
-
-	done, fallback = c.tryFirstServeCachedManifest(rw, r, info)
-	if done {
-		doneCache()
-		return
-	}
-
-	type signal struct {
-		err error
-	}
-	signalCh := make(chan signal, 1)
-
-	go func() {
-		defer doneCache()
-		err := c.cacheManifest(context.Background(), info)
-		if err != nil {
-			if fallback {
-				c.logger.Warn("failed to request, but hit caches", "error", err)
-				signalCh <- signal{
-					err: nil,
-				}
-				return
-			}
-			if c.manifestCache != nil {
-				c.manifestCache.PutError(info, err)
-			}
-			c.logger.Error("failed to request", "error", err)
-		}
-		signalCh <- signal{
-			err: err,
+	var fallback bool
+	var cancel func()
+	defer func() {
+		if cancel != nil {
+			cancel()
 		}
 	}()
 
-	var hasCache bool
+	key := manifestCacheKey(info)
+	err := c.uniq.Do(ctx, key,
+		func(ctx context.Context) (passCtx context.Context, done bool) {
+			done, fallback = c.tryFirstServeCachedManifest(rw, r, info)
+			if fallback &&
+				cancel == nil &&
+				c.recacheMaxWait > 0 &&
+				c.checkCachedManifest(rw, r, info) {
+				ctx, cancel = context.WithTimeout(ctx, c.recacheMaxWait)
 
-	if c.recacheMaxWait > 0 {
-		hasCache = c.checkCachedManifest(rw, r, info)
-		if hasCache {
-			var cancel func()
-			ctx, cancel = context.WithTimeout(ctx, c.recacheMaxWait)
-			defer cancel()
-		}
-	}
-
-	select {
-	case <-ctx.Done():
-		if hasCache {
-			c.logger.Warn("failed to request, but hit caches", "error", ctx.Err())
-			if c.serveCachedManifest(rw, r, info) {
-				return
 			}
-		}
-		c.errorResponse(rw, r, ctx.Err())
-		return
-	case signal := <-signalCh:
-		if signal.err != nil {
-			c.errorResponse(rw, r, signal.err)
+			return ctx, done
+		},
+		func(_ context.Context, cancelCauseFunc context.CancelCauseFunc) error {
+			err := c.cacheManifest(info)
+			if err != nil {
+				return err
+			}
+			if c.serveCachedManifest(rw, r, info) {
+				return nil
+			}
+			return errcode.ErrorCodeUnknown
+		},
+	)
+	if err != nil {
+		if fallback && c.serveCachedManifest(rw, r, info) {
 			return
 		}
 
-		if c.serveCachedManifest(rw, r, info) {
-			return
-		}
-
-		c.logger.Error("should not be executed", "url", r.URL.String())
-		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
+		c.logger.Warn("error response", "remoteAddr", r.RemoteAddr, "error", err.Error())
+		errcode.ServeJSON(rw, err)
 		return
 	}
 }
 
-func (c *Gateway) cacheManifest(ctx context.Context, info *PathInfo) error {
+func (c *Gateway) cacheManifest(info *PathInfo) error {
+	ctx := context.Background()
 	u := &url.URL{
 		Scheme: "https",
 		Host:   info.Host,
@@ -207,6 +156,9 @@ func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Re
 
 	val, ok := c.manifestCache.Get(info)
 	if !ok {
+		if info.IsDigestManifests {
+			return c.serveCachedManifest(rw, r, info), false
+		}
 		return false, true
 	}
 	if val.Error != nil {
@@ -234,20 +186,11 @@ func (c *Gateway) serveCachedManifest(rw http.ResponseWriter, r *http.Request, i
 
 	content, digest, mediaType, err := c.cache.GetManifestContent(ctx, info.Host, info.Image, info.Manifests)
 	if err != nil {
-		c.logger.Warn("Manifest cache missed", "host", info.Host, "image", info.Blobs, "manifest", info.Manifests, "digest", digest, "error", err)
+		c.logger.Warn("Manifest cache missed", "host", info.Host, "image", info.Blobs, "manifest", info.Manifests, "digest", digest)
 		return false
 	}
 
-	c.logger.Info("Manifest cache hit", "host", info.Host, "image", info.Blobs, "manifest", info.Manifests, "digest", digest)
-
 	length := strconv.FormatInt(int64(len(content)), 10)
-	rw.Header().Set("Docker-Content-Digest", digest)
-	rw.Header().Set("Content-Type", mediaType)
-	rw.Header().Set("Content-Length", length)
-
-	if r.Method != http.MethodHead {
-		rw.Write(content)
-	}
 
 	if c.manifestCache != nil {
 		c.manifestCache.Put(info, cacheValue{
@@ -256,5 +199,16 @@ func (c *Gateway) serveCachedManifest(rw http.ResponseWriter, r *http.Request, i
 			Length:    length,
 		})
 	}
+
+	c.logger.Info("Manifest cache hit", "host", info.Host, "image", info.Blobs, "manifest", info.Manifests, "digest", digest)
+
+	rw.Header().Set("Docker-Content-Digest", digest)
+	rw.Header().Set("Content-Type", mediaType)
+	rw.Header().Set("Content-Length", length)
+
+	if r.Method != http.MethodHead {
+		rw.Write(content)
+	}
+
 	return true
 }

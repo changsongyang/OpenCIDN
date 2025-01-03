@@ -9,10 +9,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/daocloud/crproxy/cache"
+	"github.com/daocloud/crproxy/internal/unique"
 	"github.com/daocloud/crproxy/internal/utils"
 	"github.com/daocloud/crproxy/token"
 	"github.com/docker/distribution/registry/api/errcode"
@@ -30,7 +30,7 @@ type BlobInfo struct {
 }
 
 type Agent struct {
-	mutCache      sync.Map
+	uniq          unique.Unique[string]
 	httpClient    *http.Client
 	logger        *slog.Logger
 	cache         *cache.Cache
@@ -143,7 +143,7 @@ func (c *Agent) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	if c.authenticator != nil {
 		t, err = c.authenticator.Authorization(r)
 		if err != nil {
-			c.errorResponse(rw, r, errcode.ErrorCodeDenied.WithMessage(err.Error()))
+			errcode.ServeJSON(rw, errcode.ErrorCodeDenied.WithMessage(err.Error()))
 			return
 		}
 	}
@@ -163,107 +163,79 @@ func (c *Agent) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t *token.Token) {
 	ctx := r.Context()
 
-	closeValue, loaded := c.mutCache.LoadOrStore(info.Blobs, make(chan struct{}))
-	closeCh := closeValue.(chan struct{})
-	for loaded {
-		select {
-		case <-ctx.Done():
-			err := ctx.Err().Error()
-			c.logger.Warn("context done", "error", err)
-			http.Error(rw, err, http.StatusInternalServerError)
-			return
-		case <-closeCh:
-		}
-		closeValue, loaded = c.mutCache.LoadOrStore(info.Blobs, make(chan struct{}))
-		closeCh = closeValue.(chan struct{})
+	var start time.Time
+	if !t.NoRateLimit {
+		start = time.Now()
 	}
 
-	doneCache := func() {
-		c.mutCache.Delete(info.Blobs)
-		close(closeCh)
-	}
-
-	stat, err := c.cache.StatBlob(ctx, info.Blobs)
-	if err == nil {
-		doneCache()
-
-		size := stat.Size()
-		if r.Method == http.MethodHead {
-			rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-			rw.Header().Set("Content-Type", "application/octet-stream")
-			return
-		}
-
-		if !t.NoRateLimit {
-			sleepDuration(float64(size), float64(t.RateLimitPerSecond))
-		}
-
-		c.redirectOrRedirect(rw, r, info.Blobs, info, size)
+	var size int64
+	err := c.uniq.Do(ctx, info.Blobs,
+		func(ctx context.Context) (passCtx context.Context, done bool) {
+			stat, err := c.cache.StatBlob(ctx, info.Blobs)
+			if err != nil {
+				return ctx, false
+			}
+			size = stat.Size()
+			return ctx, true
+		},
+		func(_ context.Context, cancelCauseFunc context.CancelCauseFunc) (err error) {
+			var statsFunc func(s int64)
+			if r.Method == http.MethodHead {
+				statsFunc = func(s int64) {
+					size = s
+					cancelCauseFunc(nil)
+				}
+			}
+			s, err := c.cacheBlob(info, statsFunc)
+			if err != nil {
+				return err
+			}
+			size = s
+			return nil
+		},
+	)
+	if size != 0 && r.Method == http.MethodHead {
+		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+		rw.Header().Set("Content-Type", "application/octet-stream")
 		return
 	}
-	c.logger.Info("Cache miss", "digest", info.Blobs)
 
-	type signal struct {
-		err  error
-		size int64
-	}
-	signalCh := make(chan signal, 1)
-
-	go func() {
-		defer doneCache()
-		size, err := c.cacheBlob(info, func(size int64) {
-			signalCh <- signal{
-				size: size,
-			}
-		})
-		signalCh <- signal{
-			err:  err,
-			size: size,
-		}
-	}()
-
-	select {
-	case <-ctx.Done():
-		c.errorResponse(rw, r, ctx.Err())
+	if err != nil {
+		c.logger.Warn("error response", "remoteAddr", r.RemoteAddr, "error", err)
+		errcode.ServeJSON(rw, err)
 		return
-	case signal := <-signalCh:
-		if signal.err != nil {
-			c.errorResponse(rw, r, signal.err)
-			return
-		}
-		if r.Method == http.MethodHead {
-			rw.Header().Set("Content-Length", strconv.FormatInt(signal.size, 10))
-			rw.Header().Set("Content-Type", "application/octet-stream")
-			return
-		}
+	}
 
-		if !t.NoRateLimit {
-			sleepDuration(float64(signal.size), float64(t.RateLimitPerSecond))
-		}
-
-		select {
-		case <-ctx.Done():
+	if !t.NoRateLimit {
+		err := sleepDuration(r.Context(), float64(size), float64(t.RateLimitPerSecond), start)
+		if err != nil {
+			errcode.ServeJSON(rw, err)
 			return
-		case signal := <-signalCh:
-			if signal.err != nil {
-				c.errorResponse(rw, r, signal.err)
-				return
-			}
-			c.redirectOrRedirect(rw, r, info.Blobs, info, signal.size)
 		}
+	}
+
+	err = c.redirectOrRedirect(rw, r, info.Blobs, info, size)
+	if err != nil {
+		errcode.ServeJSON(rw, err)
 		return
 	}
 }
 
-func sleepDuration(size, limit float64) {
+func sleepDuration(ctx context.Context, size, limit float64, start time.Time) error {
 	if limit <= 0 {
-		return
+		return nil
+	}
+	sd := time.Duration(size/limit*float64(time.Second)) - time.Since(start)
+	if sd < time.Second/10 {
+		return nil
 	}
 
-	sd := time.Duration(size / limit * float64(time.Second))
-	if sd > time.Second/10 {
-		time.Sleep(sd)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(sd):
 	}
+	return nil
 }
 
 func (c *Agent) cacheBlob(info *BlobInfo, stats func(int64)) (int64, error) {
@@ -303,32 +275,17 @@ func (c *Agent) cacheBlob(info *BlobInfo, stats func(int64)) (int64, error) {
 	return c.cache.PutBlob(context.Background(), info.Blobs, resp.Body)
 }
 
-func (c *Agent) errorResponse(rw http.ResponseWriter, r *http.Request, err error) {
-	if err != nil {
-		e := err.Error()
-		c.logger.Warn("error response", "remoteAddr", r.RemoteAddr, "error", e)
-	}
-
-	if err == nil {
-		err = errcode.ErrorCodeUnknown
-	}
-
-	errcode.ServeJSON(rw, err)
-}
-
-func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, size int64) {
+func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, size int64) error {
 	if c.blobsLENoAgent < 0 || int64(c.blobsLENoAgent) > size {
 		data, err := c.cache.GetBlob(r.Context(), info.Blobs)
 		if err != nil {
-			c.logger.Error("failed to get blob", "digest", info.Blobs, "error", err)
-			c.errorResponse(rw, r, err)
-			return
+			return err
 		}
 		defer data.Close()
 		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 		rw.Header().Set("Content-Type", "application/octet-stream")
 		io.Copy(rw, data)
-		return
+		return nil
 	}
 
 	referer := r.RemoteAddr
@@ -338,10 +295,9 @@ func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob
 
 	u, err := c.cache.RedirectBlob(r.Context(), blob, referer)
 	if err != nil {
-		c.logger.Error("failed to get redirect", "digest", info.Blobs, "error", err)
-		c.errorResponse(rw, r, err)
-		return
+		return err
 	}
 	c.logger.Info("Cache hit", "digest", blob, "url", u)
 	http.Redirect(rw, r, u, http.StatusTemporaryRedirect)
+	return nil
 }

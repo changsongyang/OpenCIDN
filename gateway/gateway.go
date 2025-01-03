@@ -8,11 +8,11 @@ import (
 	"net/textproto"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/daocloud/crproxy/agent"
 	"github.com/daocloud/crproxy/cache"
+	"github.com/daocloud/crproxy/internal/unique"
 	"github.com/daocloud/crproxy/internal/utils"
 	"github.com/daocloud/crproxy/token"
 	"github.com/docker/distribution/registry/api/errcode"
@@ -30,7 +30,7 @@ type ImageInfo struct {
 }
 
 type Gateway struct {
-	mutCache        sync.Map
+	uniq            unique.Unique[cacheKey]
 	httpClient      *http.Client
 	modify          func(info *ImageInfo) *ImageInfo
 	logger          *slog.Logger
@@ -336,17 +336,4 @@ func (c *Gateway) forward(rw http.ResponseWriter, r *http.Request, info *PathInf
 
 		io.Copy(rw, body)
 	}
-}
-
-func (c *Gateway) errorResponse(rw http.ResponseWriter, r *http.Request, err error) {
-	if err != nil {
-		e := err.Error()
-		c.logger.Warn("error response", "remoteAddr", r.RemoteAddr, "error", e)
-	}
-
-	if err == nil {
-		err = errcode.ErrorCodeUnknown
-	}
-
-	errcode.ServeJSON(rw, err)
 }

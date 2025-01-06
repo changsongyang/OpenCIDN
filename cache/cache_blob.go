@@ -33,6 +33,11 @@ func (c *Cache) GetBlob(ctx context.Context, blob string) (io.ReadCloser, error)
 	return c.Get(ctx, cachePath)
 }
 
+func (c *Cache) DeleteBlob(ctx context.Context, blob string) error {
+	cachePath := blobCachePath(blob)
+	return c.Delete(ctx, cachePath)
+}
+
 func (c *Cache) GetBlobContent(ctx context.Context, blob string) ([]byte, error) {
 	r, err := c.GetBlob(ctx, blob)
 	if err != nil {

@@ -177,7 +177,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		return fmt.Errorf("create clientset failed: %w", err)
 	}
 
-	tp = transport.NewLogTransport(tp, logger, 10*time.Second)
+	tp = transport.NewLogTransport(tp, logger, time.Second)
 
 	client := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {

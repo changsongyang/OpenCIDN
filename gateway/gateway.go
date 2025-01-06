@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -38,8 +39,9 @@ type Gateway struct {
 	cache           *cache.Cache
 	recacheMaxWait  time.Duration
 
-	manifestCache *manifestCache
-	authenticator *token.Authenticator
+	manifestCacheDuration time.Duration
+	manifestCache         *manifestCache
+	authenticator         *token.Authenticator
 
 	defaultRegistry         string
 	overrideDefaultRegistry map[string]string
@@ -63,7 +65,7 @@ func WithClient(client *http.Client) Option {
 
 func WithManifestCacheDuration(d time.Duration) Option {
 	return func(c *Gateway) {
-		c.manifestCache = newManifestCache(d)
+		c.manifestCacheDuration = d
 	}
 }
 
@@ -130,7 +132,8 @@ func NewGateway(opts ...Option) (*Gateway, error) {
 			"application/vnd.oci.image.manifest.v1+json",
 			"application/vnd.docker.distribution.manifest.v2+json",
 		},
-		accepts: map[string]struct{}{},
+		accepts:               map[string]struct{}{},
+		manifestCacheDuration: time.Minute,
 	}
 
 	for _, item := range c.acceptsItems {
@@ -155,6 +158,10 @@ func NewGateway(opts ...Option) (*Gateway, error) {
 		}
 		c.agent = a
 	}
+
+	c.manifestCache = newManifestCache(c.manifestCacheDuration)
+
+	c.manifestCache.Start(context.Background(), c.logger)
 	return c, nil
 }
 

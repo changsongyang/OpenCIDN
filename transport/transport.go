@@ -182,6 +182,12 @@ func toUserAndPass(userpass []string) (map[string]authn.AuthConfig, error) {
 			Username: user,
 			Password: pwd,
 		}
+		if host == "docker.io" {
+			bc["registry-1.docker.io"] = authn.AuthConfig{
+				Username: user,
+				Password: pwd,
+			}
+		}
 	}
 	return bc, nil
 }

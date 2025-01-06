@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -89,7 +90,15 @@ func (c *Cache) GetManifestContent(ctx context.Context, host, image, tagOrBlob s
 	}{}
 	err = json.Unmarshal(content, &mt)
 	if err != nil {
-		return nil, "", "", err
+		cleanErr := c.DeleteBlob(ctx, digest)
+		if cleanErr != nil {
+			err = errors.Join(err, cleanErr)
+		}
+		cleanErr = c.Delete(ctx, manifestLinkPath)
+		if cleanErr != nil {
+			err = errors.Join(err, cleanErr)
+		}
+		return nil, "", "", fmt.Errorf("invalid content: %w: %s", err, string(content))
 	}
 
 	mediaType := mt.MediaType

@@ -138,6 +138,10 @@ func (c *Cache) PutWithHash(ctx context.Context, cachePath string, r io.Reader, 
 	})
 }
 
+func (c *Cache) Delete(ctx context.Context, cachePath string) error {
+	return c.storageDriver.Delete(ctx, cachePath)
+}
+
 func (c *Cache) Get(ctx context.Context, cachePath string) (io.ReadCloser, error) {
 	return c.storageDriver.Reader(ctx, cachePath, 0)
 }

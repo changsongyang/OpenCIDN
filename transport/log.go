@@ -20,12 +20,26 @@ func NewLogTransport(baseTransport http.RoundTripper, logger *slog.Logger, minEl
 	}
 }
 
-func (l *logTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+func (l *logTransport) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	start := time.Now()
 	defer func() {
 		elapsed := time.Since(start)
 		if elapsed >= l.minElapsed {
-			l.logger.Warn("long time request", "elapsed", elapsed.String(), "url", req.URL.String())
+			if err != nil {
+				l.logger.Warn("long time request error",
+					"elapsed", elapsed.String(),
+					"method", req.Method,
+					"url", req.URL.String(),
+					"error", err,
+				)
+			} else {
+				l.logger.Warn("long time request",
+					"elapsed", elapsed.String(),
+					"method", req.Method,
+					"url", req.URL.String(),
+					"statusCode", resp.StatusCode,
+				)
+			}
 		}
 	}()
 

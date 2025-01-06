@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"context"
+	"log/slog"
 	"time"
 
 	"github.com/wzshiming/imc"
@@ -20,12 +22,24 @@ func newManifestCache(duration time.Duration) *manifestCache {
 	}
 }
 
-func (m *manifestCache) Evict(info *PathInfo) {
-	if info.IsDigestManifests {
-		m.digest.Evict(nil)
-	} else {
-		m.tag.Evict(nil)
-	}
+func (m *manifestCache) Start(ctx context.Context, logger *slog.Logger) {
+	go m.digest.RunEvict(ctx, func(key cacheKey, value cacheDigestValue) bool {
+		if value.Error != nil {
+			logger.Info("evict manifest digest error", "key", key, "error", value.Error)
+		} else {
+			logger.Info("evict manifest digest", "key", key)
+		}
+		return true
+	})
+
+	go m.tag.RunEvict(ctx, func(key cacheKey, value cacheTagValue) bool {
+		if value.Error != nil {
+			logger.Info("evict manifest tag error", "key", key, "error", value.Error)
+		} else {
+			logger.Info("evict manifest tag", "key", key)
+		}
+		return true
+	})
 }
 
 func (m *manifestCache) Get(info *PathInfo) (cacheValue, bool) {

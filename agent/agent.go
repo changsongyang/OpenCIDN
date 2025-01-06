@@ -30,11 +30,14 @@ type BlobInfo struct {
 }
 
 type Agent struct {
-	uniq          unique.Unique[string]
-	httpClient    *http.Client
-	logger        *slog.Logger
-	cache         *cache.Cache
-	authenticator *token.Authenticator
+	uniq       unique.Unique[string]
+	httpClient *http.Client
+	logger     *slog.Logger
+	cache      *cache.Cache
+
+	blobCacheDuration time.Duration
+	blobCache         *blobCache
+	authenticator     *token.Authenticator
 
 	blobsLENoAgent int
 }
@@ -76,15 +79,26 @@ func WithBlobsLENoAgent(blobsLENoAgent int) Option {
 	}
 }
 
+func WithBlobCacheDuration(blobCacheDuration time.Duration) Option {
+	return func(c *Agent) error {
+		c.blobCacheDuration = blobCacheDuration
+		return nil
+	}
+}
+
 func NewAgent(opts ...Option) (*Agent, error) {
 	c := &Agent{
-		logger:     slog.Default(),
-		httpClient: http.DefaultClient,
+		logger:            slog.Default(),
+		httpClient:        http.DefaultClient,
+		blobCacheDuration: time.Hour,
 	}
 
 	for _, opt := range opts {
 		opt(c)
 	}
+
+	c.blobCache = newBlobCache(c.blobCacheDuration)
+	c.blobCache.Start(context.Background(), c.logger)
 
 	return c, nil
 }
@@ -168,54 +182,39 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 		start = time.Now()
 	}
 
-	var size int64
 	err := c.uniq.Do(ctx, info.Blobs,
 		func(ctx context.Context) (passCtx context.Context, done bool) {
+			value, ok := c.blobCache.Get(info.Blobs)
+			if ok {
+				if value.Error != nil {
+					errcode.ServeJSON(rw, value.Error)
+					return ctx, true
+				}
+				c.serveCachedBlob(rw, r, info.Blobs, info, t, value.Size, start)
+				return ctx, true
+			}
 			stat, err := c.cache.StatBlob(ctx, info.Blobs)
 			if err != nil {
 				return ctx, false
 			}
-			size = stat.Size()
+			c.serveCachedBlob(rw, r, info.Blobs, info, t, stat.Size(), start)
 			return ctx, true
 		},
-		func(_ context.Context, cancelCauseFunc context.CancelCauseFunc) (err error) {
-			var statsFunc func(s int64)
-			if r.Method == http.MethodHead {
-				statsFunc = func(s int64) {
-					size = s
-					cancelCauseFunc(nil)
-				}
+		func(ctx context.Context) (err error) {
+			if ctx.Err() != nil {
+				return nil
 			}
-			s, err := c.cacheBlob(info, statsFunc)
+			size, err := c.cacheBlob(info)
 			if err != nil {
 				return err
 			}
-			size = s
+			c.serveCachedBlob(rw, r, info.Blobs, info, t, size, start)
 			return nil
 		},
 	)
-	if size != 0 && r.Method == http.MethodHead {
-		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-		rw.Header().Set("Content-Type", "application/octet-stream")
-		return
-	}
-
 	if err != nil {
 		c.logger.Warn("error response", "remoteAddr", r.RemoteAddr, "error", err)
-		errcode.ServeJSON(rw, err)
-		return
-	}
-
-	if !t.NoRateLimit {
-		err := sleepDuration(r.Context(), float64(size), float64(t.RateLimitPerSecond), start)
-		if err != nil {
-			errcode.ServeJSON(rw, err)
-			return
-		}
-	}
-
-	err = c.redirectOrRedirect(rw, r, info.Blobs, info, size)
-	if err != nil {
+		c.blobCache.PutError(info.Blobs, err)
 		errcode.ServeJSON(rw, err)
 		return
 	}
@@ -238,13 +237,14 @@ func sleepDuration(ctx context.Context, size, limit float64, start time.Time) er
 	return nil
 }
 
-func (c *Agent) cacheBlob(info *BlobInfo, stats func(int64)) (int64, error) {
+func (c *Agent) cacheBlob(info *BlobInfo) (int64, error) {
+	ctx := context.Background()
 	u := &url.URL{
 		Scheme: "https",
 		Host:   info.Host,
 		Path:   fmt.Sprintf("/v2/%s/blobs/%s", info.Image, info.Blobs),
 	}
-	forwardReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u.String(), nil)
+	forwardReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		c.logger.Warn("failed to new request", "url", u.String(), "error", err)
 		return 0, err
@@ -268,36 +268,56 @@ func (c *Agent) cacheBlob(info *BlobInfo, stats func(int64)) (int64, error) {
 		return 0, errcode.ErrorCodeUnknown.WithMessage(fmt.Sprintf("source response code %d: %s", resp.StatusCode, u.String()))
 	}
 
-	if stats != nil {
-		stats(resp.ContentLength)
-	}
-
-	return c.cache.PutBlob(context.Background(), info.Blobs, resp.Body)
+	return c.cache.PutBlob(ctx, info.Blobs, resp.Body)
 }
 
-func (c *Agent) redirectOrRedirect(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, size int64) error {
+func (c *Agent) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, size int64, start time.Time) {
+	if size != 0 && r.Method == http.MethodHead {
+		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+		rw.Header().Set("Content-Type", "application/octet-stream")
+		return
+	}
+
+	if !t.NoRateLimit {
+		err := sleepDuration(r.Context(), float64(size), float64(t.RateLimitPerSecond), start)
+		if err != nil {
+			return
+		}
+	}
+
 	if c.blobsLENoAgent < 0 || int64(c.blobsLENoAgent) > size {
 		data, err := c.cache.GetBlob(r.Context(), info.Blobs)
 		if err != nil {
-			return err
+			c.logger.Info("failed to get blob", "digest", blob, "error", err)
+			c.blobCache.Remove(info.Blobs)
+			errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
+			return
 		}
 		defer data.Close()
+
+		c.blobCache.Put(info.Blobs, size)
+
 		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 		rw.Header().Set("Content-Type", "application/octet-stream")
 		io.Copy(rw, data)
-		return nil
+		return
 	}
 
 	referer := r.RemoteAddr
 	if info != nil {
-		referer += fmt.Sprintf(":%s/%s", info.Host, info.Image)
+		referer += fmt.Sprintf("%d:%s/%s", t.UserID, info.Host, info.Image)
 	}
 
 	u, err := c.cache.RedirectBlob(r.Context(), blob, referer)
 	if err != nil {
-		return err
+		c.logger.Info("failed to redirect blob", "digest", blob, "error", err)
+		c.blobCache.Remove(info.Blobs)
+		errcode.ServeJSON(rw, errcode.ErrorCodeUnknown)
+		return
 	}
+
+	c.blobCache.Put(info.Blobs, size)
+
 	c.logger.Info("Cache hit", "digest", blob, "url", u)
 	http.Redirect(rw, r, u, http.StatusTemporaryRedirect)
-	return nil
 }

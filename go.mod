@@ -20,7 +20,7 @@ require (
 	github.com/wzshiming/cmux v0.4.2
 	github.com/wzshiming/geario v0.0.0-20240308093553-a996e3817533
 	github.com/wzshiming/hostmatcher v0.0.3
-	github.com/wzshiming/imc v0.0.0-20241230040120-5e21bf59cef4
+	github.com/wzshiming/imc v0.0.0-20250106051804-1cb884b5184a
 	golang.org/x/crypto v0.28.0
 )
 

@@ -10,7 +10,7 @@ type Unique[K comparable] struct {
 }
 
 type PreCheck func(ctx context.Context) (passCtx context.Context, done bool)
-type Workload func(ctx context.Context, cancelCauseFunc context.CancelCauseFunc) (err error)
+type Workload func(ctx context.Context) (err error)
 
 func (u *Unique[K]) signal(key K) (chan struct{}, bool) {
 	sig, loaded := u.tracing.LoadOrStore(key, make(chan struct{}))
@@ -61,18 +61,16 @@ func (u *Unique[K]) Do(
 		}
 	}
 
-	ctx, cancel := context.WithCancelCause(ctx)
 	errCh := make(chan error, 1)
 	go func() {
 		defer endFunc()
-		errCh <- wl(ctx, cancel)
+		errCh <- wl(ctx)
 	}()
 
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-errCh:
-		cancel(nil)
 		return err
 	}
 }

@@ -40,7 +40,8 @@ type flagpole struct {
 	TokenPublicKeyFile string
 	TokenURL           string
 
-	BlobsLENoAgent int
+	BlobsLENoAgent    int
+	BlobCacheDuration time.Duration
 }
 
 func NewCommand() *cobra.Command {
@@ -75,6 +76,7 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.TokenURL, "token-url", flags.TokenURL, "Token url")
 
 	cmd.Flags().IntVar(&flags.BlobsLENoAgent, "blobs-le-no-agent", flags.BlobsLENoAgent, "Less than or equal to No Agent")
+	cmd.Flags().DurationVar(&flags.BlobCacheDuration, "blob-cache-duration", flags.BlobCacheDuration, "Blob cache duration")
 	return cmd
 }
 
@@ -113,6 +115,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		agent.WithCache(cache),
 		agent.WithLogger(logger),
 		agent.WithBlobsLENoAgent(flags.BlobsLENoAgent),
+		agent.WithBlobCacheDuration(flags.BlobCacheDuration),
 	)
 
 	if flags.TokenPublicKeyFile != "" {

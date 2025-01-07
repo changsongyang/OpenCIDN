@@ -3,13 +3,16 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 
+	"github.com/daocloud/crproxy/internal/utils"
 	"github.com/docker/distribution/registry/api/errcode"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 )
 
 func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request, info *PathInfo) {
@@ -39,9 +42,11 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 			if ctx.Err() != nil {
 				return errcode.ErrorCodeUnknown
 			}
-			err := c.cacheManifest(info)
+			sc, err := c.cacheManifest(info)
 			if err != nil {
-				return err
+				c.manifestCache.PutError(info, err, sc)
+				utils.ServeError(rw, r, err, sc)
+				return nil
 			}
 			if ctx.Err() != nil {
 				return errcode.ErrorCodeUnknown
@@ -57,12 +62,13 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 			return
 		}
 
-		c.serveError(rw, r, info, err)
+		c.manifestCache.PutError(info, err, 0)
+		utils.ServeError(rw, r, err, 0)
 		return
 	}
 }
 
-func (c *Gateway) cacheManifest(info *PathInfo) error {
+func (c *Gateway) cacheManifest(info *PathInfo) (int, error) {
 	ctx := context.Background()
 	u := &url.URL{
 		Scheme: "https",
@@ -73,30 +79,35 @@ func (c *Gateway) cacheManifest(info *PathInfo) error {
 	if !info.IsDigestManifests {
 		forwardReq, err := http.NewRequestWithContext(ctx, http.MethodHead, u.String(), nil)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		// Never trust a client's Accept !!!
 		forwardReq.Header.Set("Accept", c.acceptsStr)
 
 		resp, err := c.httpClient.Do(forwardReq)
 		if err != nil {
-			return err
+			var tErr *transport.Error
+			if errors.As(err, &tErr) {
+				return http.StatusForbidden, errcode.ErrorCodeDenied
+			}
+			c.logger.Warn("failed to request", "url", u.String(), "error", err)
+			return 0, errcode.ErrorCodeUnknown
 		}
 		if resp.Body != nil {
 			resp.Body.Close()
 		}
 		switch resp.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
-			return errcode.ErrorCodeDenied
+			return 0, errcode.ErrorCodeDenied
 		}
 		if resp.StatusCode < http.StatusOK ||
 			(resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest) {
-			return errcode.ErrorCodeUnknown
+			return 0, errcode.ErrorCodeUnknown
 		}
 
 		digest := resp.Header.Get("Docker-Content-Digest")
 		if digest == "" {
-			return errcode.ErrorCodeDenied
+			return 0, errcode.ErrorCodeDenied
 		}
 
 		err = c.cache.RelinkManifest(ctx, info.Host, info.Image, info.Manifests, digest)
@@ -104,22 +115,26 @@ func (c *Gateway) cacheManifest(info *PathInfo) error {
 			c.logger.Warn("failed relink manifest", "url", u.String(), "error", err)
 		} else {
 			c.logger.Info("relink manifest", "url", u.String())
-			return nil
+			return 0, nil
 		}
 		u.Path = fmt.Sprintf("/v2/%s/manifests/%s", info.Image, digest)
 	}
 
 	forwardReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	// Never trust a client's Accept !!!
 	forwardReq.Header.Set("Accept", c.acceptsStr)
 
 	resp, err := c.httpClient.Do(forwardReq)
 	if err != nil {
+		var tErr *transport.Error
+		if errors.As(err, &tErr) {
+			return http.StatusForbidden, errcode.ErrorCodeDenied
+		}
 		c.logger.Warn("failed to request", "url", u.String(), "error", err)
-		return errcode.ErrorCodeUnknown
+		return 0, errcode.ErrorCodeUnknown
 	}
 	defer func() {
 		resp.Body.Close()
@@ -128,22 +143,22 @@ func (c *Gateway) cacheManifest(info *PathInfo) error {
 	switch resp.StatusCode {
 	case http.StatusUnauthorized, http.StatusForbidden:
 		c.logger.Error("upstream denied", "statusCode", resp.StatusCode, "url", u.String(), "response", dumpResponse(resp))
-		return errcode.ErrorCodeDenied
+		return 0, errcode.ErrorCodeDenied
 	}
 	if resp.StatusCode < http.StatusOK ||
 		(resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest) {
 		c.logger.Error("upstream unkown code", "statusCode", resp.StatusCode, "url", u.String(), "response", dumpResponse(resp))
-		return errcode.ErrorCodeUnknown
+		return 0, errcode.ErrorCodeUnknown
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	if err != nil {
 		c.logger.Error("failed to get body", "statusCode", resp.StatusCode, "url", u.String(), "error", err)
-		return errcode.ErrorCodeUnknown
+		return 0, errcode.ErrorCodeUnknown
 	}
 	if !json.Valid(body) {
 		c.logger.Error("invalid body", "statusCode", resp.StatusCode, "url", u.String(), "body", string(body))
-		return errcode.ErrorCodeDenied
+		return 0, errcode.ErrorCodeDenied
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
@@ -151,17 +166,16 @@ func (c *Gateway) cacheManifest(info *PathInfo) error {
 		err = retErrs.UnmarshalJSON(body)
 		if err != nil {
 			c.logger.Error("failed to unmarshal body", "statusCode", resp.StatusCode, "url", u.String(), "body", string(body))
-			return errcode.ErrorCodeUnknown
+			return 0, errcode.ErrorCodeUnknown
 		}
-		err = append(errcode.Errors{errcode.ErrorCode(resp.StatusCode)}, retErrs...)
-		return err
+		return resp.StatusCode, retErrs
 	}
 
 	_, _, err = c.cache.PutManifestContent(ctx, info.Host, info.Image, info.Manifests, body)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return nil
+	return 0, nil
 }
 
 func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) (done bool, fallback bool) {
@@ -173,7 +187,7 @@ func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Re
 		return false, true
 	}
 	if val.Error != nil {
-		errcode.ServeJSON(rw, val.Error)
+		utils.ServeError(rw, r, val.Error, val.StatusCode)
 		return true, false
 	}
 
@@ -220,37 +234,4 @@ func (c *Gateway) serveCachedManifest(rw http.ResponseWriter, r *http.Request, i
 	}
 
 	return true
-}
-
-func (c *Gateway) serveError(rw http.ResponseWriter, r *http.Request, info *PathInfo, err error) error {
-	rw.Header().Set("Content-Type", "application/json; charset=utf-8")
-	var sc int
-
-	switch errs := err.(type) {
-	case errcode.Errors:
-		if len(errs) < 1 {
-			break
-		}
-
-		if err, ok := errs[0].(errcode.ErrorCoder); ok {
-			sc = err.ErrorCode().Descriptor().HTTPStatusCode
-		}
-	case errcode.ErrorCoder:
-		sc = errs.ErrorCode().Descriptor().HTTPStatusCode
-		err = errcode.Errors{err} // create an envelope.
-	default:
-		err = errcode.Errors{err}
-	}
-
-	if sc == 0 {
-		sc = http.StatusInternalServerError
-	}
-
-	rw.WriteHeader(sc)
-
-	c.manifestCache.PutError(info, err)
-
-	c.logger.Warn("error response", "remoteAddr", r.RemoteAddr, "error", err.Error())
-
-	return json.NewEncoder(rw).Encode(err)
 }

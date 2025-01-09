@@ -33,6 +33,7 @@ type flagpole struct {
 
 	TokenPrivateKeyFile string
 	TokenPublicKeyFile  string
+	TokenExpiresSecond  int
 
 	SimpleAuthUserpass map[string]string
 
@@ -49,7 +50,8 @@ type flagpole struct {
 
 func NewCommand() *cobra.Command {
 	flags := &flagpole{
-		Address: ":18000",
+		Address:            ":18000",
+		TokenExpiresSecond: 3600,
 	}
 
 	cmd := &cobra.Command{
@@ -69,6 +71,7 @@ func NewCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.TokenPrivateKeyFile, "token-private-key-file", "", "private key file")
 	cmd.Flags().StringVar(&flags.TokenPublicKeyFile, "token-public-key-file", "", "public key file")
+	cmd.Flags().IntVar(&flags.TokenExpiresSecond, "token-expires-second", flags.TokenExpiresSecond, "Token expires second")
 
 	cmd.Flags().StringToStringVar(&flags.SimpleAuthUserpass, "simple-auth-userpass", flags.SimpleAuthUserpass, "Simple auth userpass")
 
@@ -196,7 +199,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		return t.Attribute, true
 	}
 
-	gen := token.NewGenerator(token.NewEncoder(signing.NewSigner(privateKey)), authFunc, logger)
+	gen := token.NewGenerator(token.NewEncoder(signing.NewSigner(privateKey)), authFunc, flags.TokenExpiresSecond, logger)
 	container.Handle("/auth/token", gen)
 
 	var handler http.Handler = container

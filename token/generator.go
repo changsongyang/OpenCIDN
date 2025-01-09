@@ -15,20 +15,23 @@ import (
 )
 
 type Generator struct {
-	authFunc     func(r *http.Request, userinfo *url.Userinfo, t *Token) (Attribute, bool)
-	logger       *slog.Logger
-	tokenEncoder *Encoder
+	authFunc      func(r *http.Request, userinfo *url.Userinfo, t *Token) (Attribute, bool)
+	logger        *slog.Logger
+	expiresSecond int
+	tokenEncoder  *Encoder
 }
 
 func NewGenerator(
 	tokenEncoder *Encoder,
 	authFunc func(r *http.Request, userinfo *url.Userinfo, t *Token) (Attribute, bool),
+	expiresSecond int,
 	logger *slog.Logger,
 ) *Generator {
 	return &Generator{
-		authFunc:     authFunc,
-		logger:       logger,
-		tokenEncoder: tokenEncoder,
+		authFunc:      authFunc,
+		expiresSecond: expiresSecond,
+		logger:        logger,
+		tokenEncoder:  tokenEncoder,
 	}
 }
 
@@ -46,8 +49,8 @@ func (g *Generator) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	rw.Header().Set("Content-Type", "application/json")
 
-	now := time.Now()
-	expiresIn := 60
+	now := time.Now().UTC()
+	expiresIn := g.expiresSecond
 
 	t.ExpiresAt = now.Add((time.Duration(expiresIn) + 10) * time.Second)
 

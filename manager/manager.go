@@ -228,6 +228,7 @@ func (m *Manager) GetTokenWithUser(ctx context.Context, userinfo *url.Userinfo, 
 
 		NoRateLimit:        tok.Data.NoRateLimit,
 		RateLimitPerSecond: tok.Data.RateLimitPerSecond,
+		Weight:             tok.Data.Weight,
 
 		NoAllowlist:   tok.Data.NoAllowlist,
 		NoBlock:       tok.Data.NoBlock,

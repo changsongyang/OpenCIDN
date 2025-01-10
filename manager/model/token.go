@@ -16,6 +16,7 @@ type Token struct {
 type TokenAttr struct {
 	NoRateLimit        bool   `json:"no_rate_limit,omitempty"`
 	RateLimitPerSecond uint64 `json:"rate_limit_per_second,omitempty"`
+	Weight             int    `json:"weight,omitempty"`
 	AllowTagsList      bool   `json:"allow_tags_list,omitempty"`
 	NoAllowlist        bool   `json:"no_allowlist,omitempty"`
 	NoBlock            bool   `json:"no_block,omitempty"`

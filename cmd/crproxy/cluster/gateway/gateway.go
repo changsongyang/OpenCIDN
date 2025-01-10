@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -24,7 +25,8 @@ import (
 )
 
 type flagpole struct {
-	StorageURL string
+	StorageURL    string
+	RedirectLinks string
 
 	ManifestCacheDuration  time.Duration
 	RecacheMaxWaitDuration time.Duration
@@ -71,6 +73,7 @@ func NewCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&flags.StorageURL, "storage-url", flags.StorageURL, "Storage driver url")
+	cmd.Flags().StringVar(&flags.RedirectLinks, "redirect-links", flags.RedirectLinks, "Redirect links")
 	cmd.Flags().DurationVar(&flags.ManifestCacheDuration, "manifest-cache-duration", flags.ManifestCacheDuration, "Manifest cache duration")
 	cmd.Flags().DurationVar(&flags.RecacheMaxWaitDuration, "recache-max-wait-duration", flags.RecacheMaxWaitDuration, "Recache max wait duration")
 
@@ -148,6 +151,14 @@ func runE(ctx context.Context, flags *flagpole) error {
 			return fmt.Errorf("create storage driver failed: %w", err)
 		}
 		cacheOpts = append(cacheOpts, cache.WithStorageDriver(sd))
+
+		if flags.RedirectLinks != "" {
+			u, err := url.Parse(flags.RedirectLinks)
+			if err != nil {
+				return fmt.Errorf("parse redirect links failed: %w", err)
+			}
+			cacheOpts = append(cacheOpts, cache.WithRedirectLinks(u))
+		}
 
 		cache, err := cache.NewCache(cacheOpts...)
 		if err != nil {

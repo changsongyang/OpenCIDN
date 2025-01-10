@@ -5,47 +5,58 @@ import (
 	"sync"
 )
 
-type Queue[T comparable] struct {
-	queue  *queue[T]
-	queues map[int]*queue[T]
-	orders []int
-
-	doneChannel map[T]chan struct{}
-	signal      chan struct{}
-	mut         sync.RWMutex
+type index struct {
+	doneChannel chan struct{}
+	weight      int
+	soon        bool
 }
 
-func NewQueue[T comparable]() *Queue[T] {
-	q := &Queue[T]{
-		queue:       newQueue[T](),
-		queues:      map[int]*queue[T]{},
-		signal:      make(chan struct{}, 1),
-		doneChannel: map[T]chan struct{}{},
+type WeightQueue[T comparable] struct {
+	queue  *Queue[T]
+	queues map[int]*Queue[T]
+	orders []int
+
+	index  map[T]index
+	signal chan struct{}
+	mut    sync.RWMutex
+}
+
+func NewWeightQueue[T comparable]() *WeightQueue[T] {
+	q := &WeightQueue[T]{
+		queue:  NewQueue[T](),
+		queues: map[int]*Queue[T]{},
+		signal: make(chan struct{}, 1),
+		index:  map[T]index{},
 	}
 	return q
 }
 
-func (q *Queue[T]) AddWeight(item T, weight int) <-chan struct{} {
+func (q *WeightQueue[T]) addWeight(item T, weight int) {
+	if q.queues[weight] == nil {
+		q.queues[weight] = NewQueue[T]()
+	}
+	q.queues[weight].Add(item)
+}
+
+func (q *WeightQueue[T]) AddWeight(item T, weight int) <-chan struct{} {
 	if weight == 0 {
 		weight = 1
 	}
 
 	q.mut.Lock()
 
-	if weight < 0 {
-		q.queue.Add(item)
-	} else {
-		if q.queues[weight] == nil {
-			q.queues[weight] = newQueue[T]()
-		}
-		q.queues[weight].Add(item)
+	ch, ok := q.index[item]
+	if !ok {
+		ch.doneChannel = make(chan struct{})
+		ch.weight = weight
+		q.index[item] = ch
+
+		q.addWeight(item, weight)
+	} else if !ch.soon && ch.weight < weight {
+		q.queues[ch.weight].Remove(item)
+		q.addWeight(item, weight)
 	}
 
-	ch, ok := q.doneChannel[item]
-	if !ok {
-		ch = make(chan struct{})
-		q.doneChannel[item] = ch
-	}
 	q.mut.Unlock()
 
 	select {
@@ -53,10 +64,10 @@ func (q *Queue[T]) AddWeight(item T, weight int) <-chan struct{} {
 	default:
 	}
 
-	return ch
+	return ch.doneChannel
 }
 
-func (q *Queue[T]) step() bool {
+func (q *WeightQueue[T]) step() bool {
 	q.mut.Lock()
 	defer q.mut.Unlock()
 
@@ -81,6 +92,12 @@ func (q *Queue[T]) step() bool {
 				break
 			}
 
+			index, ok := q.index[t]
+			if ok {
+				index.soon = true
+				q.index[t] = index
+			}
+
 			q.queue.Add(t)
 			added = true
 		}
@@ -88,60 +105,60 @@ func (q *Queue[T]) step() bool {
 	return added
 }
 
-func (q *Queue[T]) get() (T, bool) {
+func (q *WeightQueue[T]) get() (T, int, bool) {
 	t, ok := q.queue.Get()
 	if ok {
-		return t, ok
+		return t, q.index[t].weight, ok
 	}
 
 	if q.step() {
 		t, ok := q.queue.Get()
 		if ok {
-			return t, ok
+			return t, q.index[t].weight, ok
 		}
 	}
-	return t, false
+	return t, 0, false
 }
 
-func (q *Queue[T]) Get() (T, func(), bool) {
-	t, ok := q.get()
+func (q *WeightQueue[T]) Get() (T, int, func(), bool) {
+	t, weight, ok := q.get()
 	if !ok {
-		return t, nil, false
+		return t, 0, nil, false
 	}
 
 	fun := func() {
 		q.mut.Lock()
 		defer q.mut.Unlock()
-		ch, ok := q.doneChannel[t]
+		ch, ok := q.index[t]
 		if ok {
-			close(ch)
-			delete(q.doneChannel, t)
+			close(ch.doneChannel)
+			delete(q.index, t)
 		}
 	}
-	return t, fun, true
+	return t, weight, fun, true
 }
 
-func (q *Queue[T]) GetOrWaitWithDone(done <-chan struct{}) (T, func(), bool) {
-	t, finish, ok := q.Get()
+func (q *WeightQueue[T]) GetOrWaitWithDone(done <-chan struct{}) (T, int, func(), bool) {
+	t, weight, finish, ok := q.Get()
 	if ok {
-		return t, finish, ok
+		return t, weight, finish, ok
 	}
 
 	// Wait for an item to be added.
 	for {
 		select {
 		case <-done:
-			return t, finish, false
+			return t, 0, finish, false
 		case <-q.signal:
-			t, finish, ok = q.Get()
+			t, weight, finish, ok = q.Get()
 			if ok {
-				return t, finish, true
+				return t, weight, finish, true
 			}
 		}
 	}
 }
 
-func (q *Queue[T]) Len() int {
+func (q *WeightQueue[T]) Len() int {
 	size := q.queue.Len()
 
 	q.mut.RLock()

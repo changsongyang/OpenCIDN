@@ -5,24 +5,28 @@ import (
 	"sync"
 )
 
-// queue is a generic Queue implementation.
-type queue[T any] struct {
+// Queue is a generic Queue implementation.
+type Queue[T comparable] struct {
 	base *list.List
+
+	index map[T]*list.Element
 
 	signal chan struct{}
 	mut    sync.RWMutex
 }
 
-func newQueue[T any]() *queue[T] {
-	return &queue[T]{
+func NewQueue[T comparable]() *Queue[T] {
+	return &Queue[T]{
 		base:   list.New(),
+		index:  map[T]*list.Element{},
 		signal: make(chan struct{}, 1),
 	}
 }
 
-func (q *queue[T]) Add(item T) {
+func (q *Queue[T]) Add(item T) {
 	q.mut.Lock()
-	q.base.PushBack(item)
+	element := q.base.PushBack(item)
+	q.index[item] = element
 	q.mut.Unlock()
 
 	// Signal that an item was added.
@@ -32,7 +36,7 @@ func (q *queue[T]) Add(item T) {
 	}
 }
 
-func (q *queue[T]) Get() (t T, ok bool) {
+func (q *Queue[T]) Get() (t T, ok bool) {
 	q.mut.Lock()
 	defer q.mut.Unlock()
 	item := q.base.Front()
@@ -40,10 +44,23 @@ func (q *queue[T]) Get() (t T, ok bool) {
 		return t, false
 	}
 	q.base.Remove(item)
-	return item.Value.(T), true
+	t = item.Value.(T)
+	delete(q.index, t)
+	return t, true
 }
 
-func (q *queue[T]) GetOrWait() T {
+func (q *Queue[T]) Remove(item T) bool {
+	q.mut.Lock()
+	defer q.mut.Unlock()
+	if element, exists := q.index[item]; exists {
+		q.base.Remove(element)
+		delete(q.index, item)
+		return true
+	}
+	return false
+}
+
+func (q *Queue[T]) GetOrWait() T {
 	t, ok := q.Get()
 	if ok {
 		return t
@@ -59,7 +76,7 @@ func (q *queue[T]) GetOrWait() T {
 	panic("unreachable")
 }
 
-func (q *queue[T]) GetOrWaitWithDone(done <-chan struct{}) (T, bool) {
+func (q *Queue[T]) GetOrWaitWithDone(done <-chan struct{}) (T, bool) {
 	t, ok := q.Get()
 	if ok {
 		return t, ok
@@ -79,7 +96,7 @@ func (q *queue[T]) GetOrWaitWithDone(done <-chan struct{}) (T, bool) {
 	}
 }
 
-func (q *queue[T]) Len() int {
+func (q *Queue[T]) Len() int {
 	q.mut.RLock()
 	defer q.mut.RUnlock()
 	return q.base.Len()

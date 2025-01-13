@@ -248,18 +248,19 @@ func (c *SyncManager) Image(ctx context.Context, image string) error {
 		return nil
 	}
 
+	var mpps []manifestPushPending
+
 	manifestCallback := func(caches []*cache.Cache, tagOrHash string, m distribution.Manifest) error {
 		_, playload, err := m.Payload()
 		if err != nil {
 			return fmt.Errorf("get manifest payload failed: %w", err)
 		}
 
-		for _, cache := range caches {
-			_, _, _, err = cache.PutManifestContent(ctx, host, path, tagOrHash, playload)
-			if err != nil {
-				return fmt.Errorf("put manifest content failed: %w", err)
-			}
-		}
+		mpps = append(mpps, manifestPushPending{
+			caches:    caches,
+			tagOrHash: tagOrHash,
+			playload:  playload,
+		})
 		return nil
 	}
 
@@ -303,7 +304,22 @@ func (c *SyncManager) Image(ctx context.Context, image string) error {
 		}
 	}
 
+	for i := len(mpps) - 1; i >= 0; i-- {
+		mpp := mpps[i]
+		for _, cache := range mpp.caches {
+			_, _, _, err = cache.PutManifestContent(ctx, host, path, mpp.tagOrHash, mpp.playload)
+			if err != nil {
+				return fmt.Errorf("put manifest content failed: %w", err)
+			}
+		}
+	}
 	return nil
+}
+
+type manifestPushPending struct {
+	caches    []*cache.Cache
+	tagOrHash string
+	playload  []byte
 }
 
 func (c *SyncManager) syncLayerFromManifestList(ctx context.Context, image string, ms distribution.ManifestService, ts distribution.TagService, ref reference.Reference,

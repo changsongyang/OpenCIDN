@@ -38,25 +38,13 @@ func newNameWithoutDomain(named reference.Named, name string) reference.Named {
 }
 
 type SyncManager struct {
-	transport   http.RoundTripper
-	caches      []*cache.Cache
-	logger      *slog.Logger
-	domainAlias map[string]string
-	deep        bool
+	transport http.RoundTripper
+	caches    []*cache.Cache
+	logger    *slog.Logger
+	deep      bool
 
 	excludeTags    []*regexp.Regexp
 	filterPlatform func(pf manifestlist.PlatformSpec) bool
-}
-
-func (c *SyncManager) getDomainAlias(host string) string {
-	if c.domainAlias == nil {
-		return host
-	}
-	h, ok := c.domainAlias[host]
-	if !ok {
-		return host
-	}
-	return h
 }
 
 type Option func(*SyncManager)
@@ -64,12 +52,6 @@ type Option func(*SyncManager)
 func WithDeep(deep bool) Option {
 	return func(c *SyncManager) {
 		c.deep = deep
-	}
-}
-
-func WithDomainAlias(domainAlias map[string]string) Option {
-	return func(c *SyncManager) {
-		c.domainAlias = domainAlias
 	}
 }
 
@@ -151,8 +133,6 @@ func (c *SyncManager) Image(ctx context.Context, image string) error {
 	host := reference.Domain(named)
 
 	path := reference.Path(named)
-
-	host = c.getDomainAlias(host)
 
 	name := newNameWithoutDomain(named, path)
 

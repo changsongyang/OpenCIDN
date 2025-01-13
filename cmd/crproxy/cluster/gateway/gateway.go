@@ -8,13 +8,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/daocloud/crproxy/cache"
 	"github.com/daocloud/crproxy/gateway"
 	"github.com/daocloud/crproxy/internal/pki"
 	"github.com/daocloud/crproxy/internal/server"
+	"github.com/daocloud/crproxy/internal/utils"
 	"github.com/daocloud/crproxy/signing"
 	"github.com/daocloud/crproxy/storage"
 	"github.com/daocloud/crproxy/token"
@@ -125,19 +125,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 				}
 			}
 
-			if info.Host == "docker.io" {
-				info.Host = "registry-1.docker.io"
-			} else if info.Host == "ollama.ai" {
-				info.Host = "registry.ollama.ai"
-			}
-
-			// docker.io/busybox => docker.io/library/busybox
-			if info.Host == "registry-1.docker.io" && !strings.Contains(info.Name, "/") {
-				info.Name = "library/" + info.Name
-			}
-			if info.Host == "registry.ollama.ai" && !strings.Contains(info.Name, "/") {
-				info.Name = "library/" + info.Name
-			}
+			info.Host, info.Name = utils.CorrectImage(info.Host, info.Name)
 			return info
 		}),
 		gateway.WithDisableTagsList(flags.DisableTagsList),

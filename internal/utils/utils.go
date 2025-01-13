@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/docker/distribution/registry/api/errcode"
 )
@@ -67,4 +68,21 @@ func ServeError(rw http.ResponseWriter, r *http.Request, err error, sc int) erro
 		return nil
 	}
 	return json.NewEncoder(rw).Encode(err)
+}
+
+func CorrectImage(host, name string) (string, string) {
+	if host == "docker.io" {
+		host = "registry-1.docker.io"
+	} else if host == "ollama.ai" {
+		host = "registry.ollama.ai"
+	}
+
+	// docker.io/busybox => docker.io/library/busybox
+	if host == "registry-1.docker.io" && !strings.Contains(name, "/") {
+		name = "library/" + name
+	}
+	if host == "registry.ollama.ai" && !strings.Contains(name, "/") {
+		name = "library/" + name
+	}
+	return host, name
 }

@@ -95,10 +95,6 @@ func runE(ctx context.Context, flags *flagpole) error {
 
 	opts = append(opts,
 		csync.WithCaches(caches...),
-		csync.WithDomainAlias(map[string]string{
-			"docker.io": "registry-1.docker.io",
-			"ollama.ai": "registry.ollama.ai",
-		}),
 		csync.WithDeep(flags.Deep),
 		csync.WithTransport(tp),
 		csync.WithLogger(logger),

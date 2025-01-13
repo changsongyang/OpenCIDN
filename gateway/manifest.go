@@ -37,7 +37,7 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 	var fallback bool
 	var cancel func()
 
-	done, fallback := c.tryFirstServeCachedManifest(rw, r, info)
+	done, fallback := c.tryFirstServeCachedManifest(rw, r, info, t)
 	if done {
 		return
 	}
@@ -182,7 +182,7 @@ func (c *Gateway) cacheManifest(info *PathInfo) (int, error) {
 	return 0, nil
 }
 
-func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) (done bool, fallback bool) {
+func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo, t *token.Token) (done bool, fallback bool) {
 	val, ok := c.manifestCache.Get(info)
 	if ok {
 		if val.Error != nil {
@@ -204,6 +204,10 @@ func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Re
 	}
 
 	if info.IsDigestManifests {
+		return c.serveCachedManifest(rw, r, info, true, "try"), false
+	}
+
+	if t.CacheFirst {
 		return c.serveCachedManifest(rw, r, info, true, "try"), false
 	}
 

@@ -51,6 +51,13 @@ func cleanDigest(blob string) string {
 	return strings.TrimPrefix(blob, "sha256:")
 }
 
+func ensureDigestPrefix(blob string) string {
+	if !strings.HasPrefix(blob, "sha256:") {
+		return "sha256:" + blob
+	}
+	return blob
+}
+
 func blobCachePath(blob string) string {
 	blob = cleanDigest(blob)
 	return path.Join("/docker/registry/v2/blobs/sha256", blob[:2], blob, "data")

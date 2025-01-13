@@ -12,7 +12,7 @@ import (
 )
 
 func (c *Cache) RelinkManifest(ctx context.Context, host, image, tag string, blob string) error {
-	blob = cleanDigest(blob)
+	blob = ensureDigestPrefix(blob)
 
 	_, err := c.StatBlob(ctx, blob)
 	if err != nil {
@@ -20,13 +20,13 @@ func (c *Cache) RelinkManifest(ctx context.Context, host, image, tag string, blo
 	}
 
 	manifestLinkPath := manifestTagCachePath(host, image, tag)
-	err = c.PutContent(ctx, manifestLinkPath, []byte("sha256:"+blob))
+	err = c.PutContent(ctx, manifestLinkPath, []byte(blob))
 	if err != nil {
 		return fmt.Errorf("put manifest link path %s error: %w", manifestLinkPath, err)
 	}
 
 	manifestBlobLinkPath := manifestRevisionsCachePath(host, image, blob)
-	err = c.PutContent(ctx, manifestBlobLinkPath, []byte("sha256:"+blob))
+	err = c.PutContent(ctx, manifestBlobLinkPath, []byte(blob))
 	if err != nil {
 		return fmt.Errorf("put manifest revisions path %s error: %w", manifestLinkPath, err)
 	}
@@ -142,6 +142,41 @@ func (c *Cache) StatManifest(ctx context.Context, host, image, tagOrBlob string)
 	}
 
 	return stat.Size() != 0, nil
+}
+
+func (c *Cache) StatOrRelinkManifest(ctx context.Context, host, image, tag string, blob string) (bool, error) {
+	manifestLinkPath := manifestTagCachePath(host, image, tag)
+
+	digestContent, err := c.GetContent(ctx, manifestLinkPath)
+	if err != nil {
+		return false, fmt.Errorf("get manifest link path %s error: %w", manifestLinkPath, err)
+	}
+	digest := string(digestContent)
+	stat, err := c.StatBlob(ctx, digest)
+	if err != nil {
+		return false, err
+	}
+
+	if stat.Size() == 0 {
+		return false, nil
+	}
+
+	blob = ensureDigestPrefix(blob)
+	if digest == blob {
+		return true, nil
+	}
+
+	err = c.PutContent(ctx, manifestLinkPath, []byte(blob))
+	if err != nil {
+		return false, fmt.Errorf("put manifest link path %s error: %w", manifestLinkPath, err)
+	}
+
+	manifestBlobLinkPath := manifestRevisionsCachePath(host, image, blob)
+	err = c.PutContent(ctx, manifestBlobLinkPath, []byte(blob))
+	if err != nil {
+		return false, fmt.Errorf("put manifest revisions path %s error: %w", manifestLinkPath, err)
+	}
+	return true, nil
 }
 
 func manifestRevisionsCachePath(host, image, blob string) string {

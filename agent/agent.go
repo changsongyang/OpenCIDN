@@ -473,7 +473,7 @@ func (c *Agent) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob st
 
 	referer := r.RemoteAddr
 	if info != nil {
-		referer += fmt.Sprintf("%d:%s/%s", t.UserID, info.Host, info.Image)
+		referer = fmt.Sprintf("%d-%d:%s:%s/%s", t.RegistryID, t.TokenID, referer, info.Host, info.Image)
 	}
 
 	u, err := c.cache.RedirectBlob(r.Context(), blob, referer)

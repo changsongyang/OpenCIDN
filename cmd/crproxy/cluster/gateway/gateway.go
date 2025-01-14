@@ -27,6 +27,7 @@ import (
 type flagpole struct {
 	StorageURL    string
 	RedirectLinks string
+	SignLink      bool
 
 	ManifestCacheDuration  time.Duration
 	RecacheMaxWaitDuration time.Duration
@@ -62,6 +63,7 @@ func NewCommand() *cobra.Command {
 	flags := &flagpole{
 		Address:     ":18001",
 		Concurrency: 10,
+		SignLink:    true,
 	}
 
 	cmd := &cobra.Command{
@@ -74,6 +76,8 @@ func NewCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.StorageURL, "storage-url", flags.StorageURL, "Storage driver url")
 	cmd.Flags().StringVar(&flags.RedirectLinks, "redirect-links", flags.RedirectLinks, "Redirect links")
+	cmd.Flags().BoolVar(&flags.SignLink, "sign-link", flags.SignLink, "Sign Link")
+
 	cmd.Flags().DurationVar(&flags.ManifestCacheDuration, "manifest-cache-duration", flags.ManifestCacheDuration, "Manifest cache duration")
 	cmd.Flags().DurationVar(&flags.RecacheMaxWaitDuration, "recache-max-wait-duration", flags.RecacheMaxWaitDuration, "Recache max wait duration")
 
@@ -132,7 +136,9 @@ func runE(ctx context.Context, flags *flagpole) error {
 	)
 
 	if flags.StorageURL != "" {
-		cacheOpts := []cache.Option{}
+		cacheOpts := []cache.Option{
+			cache.WithSignLink(flags.SignLink),
+		}
 
 		sd, err := storage.NewStorage(flags.StorageURL)
 		if err != nil {

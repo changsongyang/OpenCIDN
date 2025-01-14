@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,7 @@ type Cache struct {
 	bytesPool     sync.Pool
 	storageDriver storagedriver.StorageDriver
 	linkExpires   time.Duration
+	signLink      bool
 	redirectLinks *url.URL
 }
 
@@ -43,6 +45,12 @@ func WithStorageDriver(storageDriver storagedriver.StorageDriver) Option {
 	}
 }
 
+func WithSignLink(signLink bool) Option {
+	return func(c *Cache) {
+		c.signLink = signLink
+	}
+}
+
 func NewCache(opts ...Option) (*Cache, error) {
 	c := &Cache{
 		bytesPool: sync.Pool{
@@ -60,6 +68,14 @@ func NewCache(opts ...Option) (*Cache, error) {
 }
 
 func (c *Cache) Redirect(ctx context.Context, blobPath string, referer string) (string, error) {
+	if !c.signLink && c.redirectLinks != nil {
+		u, err := c.redirectLinks.Parse(strings.TrimPrefix(blobPath, "/"))
+		if err != nil {
+			return "", err
+		}
+		return u.String(), nil
+	}
+
 	options := map[string]interface{}{
 		"method": http.MethodGet,
 	}

@@ -27,6 +27,7 @@ type flagpole struct {
 	StorageURL    string
 	RedirectLinks string
 	LinkExpires   time.Duration
+	SignLink      bool
 
 	Userpass      []string
 	Retry         int
@@ -53,6 +54,7 @@ func NewCommand() *cobra.Command {
 		Address:           ":18002",
 		BlobCacheDuration: time.Hour,
 		Concurrency:       10,
+		SignLink:          true,
 	}
 
 	cmd := &cobra.Command{
@@ -66,6 +68,7 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.StorageURL, "storage-url", flags.StorageURL, "Storage driver url")
 	cmd.Flags().StringVar(&flags.RedirectLinks, "redirect-links", flags.RedirectLinks, "Redirect links")
 	cmd.Flags().DurationVar(&flags.LinkExpires, "link-expires", flags.LinkExpires, "Link expires")
+	cmd.Flags().BoolVar(&flags.SignLink, "sign-link", flags.SignLink, "Sign Link")
 
 	cmd.Flags().StringSliceVarP(&flags.Userpass, "user", "u", flags.Userpass, "host and username and password -u user:pwd@host")
 	cmd.Flags().IntVar(&flags.Retry, "retry", flags.Retry, "Retry")
@@ -95,7 +98,9 @@ func runE(ctx context.Context, flags *flagpole) error {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
-	cacheOpts := []cache.Option{}
+	cacheOpts := []cache.Option{
+		cache.WithSignLink(flags.SignLink),
+	}
 
 	sd, err := storage.NewStorage(flags.StorageURL)
 	if err != nil {

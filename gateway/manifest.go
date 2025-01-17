@@ -109,10 +109,10 @@ func (c *Gateway) cacheManifest(info *PathInfo) (int, error) {
 			cachedDigest, err := c.cache.DigestManifest(ctx, info.Host, info.Image, info.Manifests)
 			if err == nil {
 				if cachedDigest != digest {
-					msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, digest)
+					msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
 					_, err := c.queueClient.Create(context.Background(), msg, 0)
 					if err != nil {
-						c.logger.Warn("failed add message to queue", "msg", msg, "error", err)
+						c.logger.Warn("failed add message to queue", "msg", msg, "digest", digest, "error", err)
 					} else {
 						c.logger.Info("Add message to queue", "msg", msg, "digest", digest)
 					}

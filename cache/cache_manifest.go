@@ -53,24 +53,23 @@ func (c *Cache) PutManifestContent(ctx context.Context, host, image, tagOrBlob s
 
 	h := sha256.New()
 	h.Write(content)
-	hash := hex.EncodeToString(h.Sum(nil)[:])
+	hash := "sha256:" + hex.EncodeToString(h.Sum(nil)[:])
 
 	isHash := strings.HasPrefix(tagOrBlob, "sha256:")
 	if isHash {
-		tagOrBlob = tagOrBlob[7:]
 		if tagOrBlob != hash {
 			return 0, "", "", fmt.Errorf("expected hash %s is not same to %s", tagOrBlob, hash)
 		}
 	} else {
 		manifestLinkPath := manifestTagCachePath(host, image, tagOrBlob)
-		err := c.PutContent(ctx, manifestLinkPath, []byte("sha256:"+hash))
+		err := c.PutContent(ctx, manifestLinkPath, []byte(hash))
 		if err != nil {
 			return 0, "", "", fmt.Errorf("put manifest link path %s error: %w", manifestLinkPath, err)
 		}
 	}
 
 	manifestLinkPath := manifestRevisionsCachePath(host, image, hash)
-	err = c.PutContent(ctx, manifestLinkPath, []byte("sha256:"+hash))
+	err = c.PutContent(ctx, manifestLinkPath, []byte(hash))
 	if err != nil {
 		return 0, "", "", fmt.Errorf("put manifest revisions path %s error: %w", manifestLinkPath, err)
 	}

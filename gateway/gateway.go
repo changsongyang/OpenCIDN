@@ -15,6 +15,7 @@ import (
 	"github.com/daocloud/crproxy/cache"
 	"github.com/daocloud/crproxy/internal/queue"
 	"github.com/daocloud/crproxy/internal/utils"
+	"github.com/daocloud/crproxy/queue/client"
 	"github.com/daocloud/crproxy/token"
 	"github.com/docker/distribution/registry/api/errcode"
 	"github.com/wzshiming/geario"
@@ -55,6 +56,8 @@ type Gateway struct {
 	blobsLENoAgent int
 
 	agent *agent.Agent
+
+	queueClient *client.MessageClient
 }
 
 type Option func(c *Gateway)
@@ -134,6 +137,12 @@ func WithConcurrency(concurrency int) Option {
 			concurrency = 1
 		}
 		c.concurrency = concurrency
+	}
+}
+
+func WithQueueClient(queueClient *client.MessageClient) Option {
+	return func(c *Gateway) {
+		c.queueClient = queueClient
 	}
 }
 

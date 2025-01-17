@@ -105,6 +105,27 @@ func (c *Gateway) cacheManifest(info *PathInfo) (int, error) {
 			return 0, errcode.ErrorCodeDenied
 		}
 
+		if c.queueClient != nil {
+			cachedDigest, err := c.cache.DigestManifest(ctx, info.Host, info.Image, info.Manifests)
+			if err == nil {
+				if cachedDigest != digest {
+					msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, digest)
+					_, err := c.queueClient.Create(context.Background(), msg, 0)
+					if err != nil {
+						c.logger.Warn("failed add message to queue", "msg", msg, "error", err)
+					} else {
+						c.logger.Info("Add message to queue", "msg", msg, "digest", digest)
+					}
+					digest = cachedDigest
+				}
+
+				c.manifestCache.Put(info, cacheValue{
+					Digest: digest,
+				})
+				return 0, nil
+			}
+		}
+
 		err = c.cache.RelinkManifest(ctx, info.Host, info.Image, info.Manifests, digest)
 		if err != nil {
 			c.logger.Warn("failed relink manifest", "url", u.String(), "error", err)

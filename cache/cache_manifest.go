@@ -124,6 +124,16 @@ func (c *Cache) GetManifestContent(ctx context.Context, host, image, tagOrBlob s
 	return content, digest, mediaType, nil
 }
 
+func (c *Cache) DigestManifest(ctx context.Context, host, image, tag string) (string, error) {
+	manifestLinkPath := manifestTagCachePath(host, image, tag)
+
+	digestContent, err := c.GetContent(ctx, manifestLinkPath)
+	if err != nil {
+		return "", fmt.Errorf("get manifest path %s error: %w", manifestLinkPath, err)
+	}
+	return string(digestContent), nil
+}
+
 func (c *Cache) StatManifest(ctx context.Context, host, image, tagOrBlob string) (bool, error) {
 	var manifestLinkPath string
 	isHash := strings.HasPrefix(tagOrBlob, "sha256:")

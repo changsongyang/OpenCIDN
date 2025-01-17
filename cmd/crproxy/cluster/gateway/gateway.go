@@ -15,6 +15,7 @@ import (
 	"github.com/daocloud/crproxy/internal/pki"
 	"github.com/daocloud/crproxy/internal/server"
 	"github.com/daocloud/crproxy/internal/utils"
+	"github.com/daocloud/crproxy/queue/client"
 	"github.com/daocloud/crproxy/signing"
 	"github.com/daocloud/crproxy/storage"
 	"github.com/daocloud/crproxy/token"
@@ -57,6 +58,9 @@ type flagpole struct {
 	RegistryAlias map[string]string
 
 	Concurrency int
+
+	QueueURL   string
+	QueueToken string
 }
 
 func NewCommand() *cobra.Command {
@@ -105,6 +109,10 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().StringToStringVar(&flags.RegistryAlias, "registry-alias", flags.RegistryAlias, "registry alias")
 
 	cmd.Flags().IntVar(&flags.Concurrency, "concurrency", flags.Concurrency, "Concurrency to source")
+
+	cmd.Flags().StringVar(&flags.QueueToken, "queue-token", flags.QueueToken, "Queue token")
+	cmd.Flags().StringVar(&flags.QueueURL, "queue-url", flags.QueueURL, "Queue URL")
+
 	return cmd
 }
 
@@ -205,6 +213,11 @@ func runE(ctx context.Context, flags *flagpole) error {
 			time.Sleep(flags.RetryInterval)
 			return nil
 		})
+	}
+
+	if flags.QueueURL != "" {
+		queueClient := client.NewMessageClient(http.DefaultClient, flags.QueueURL, flags.QueueToken)
+		opts = append(opts, gateway.WithQueueClient(queueClient))
 	}
 
 	tp = transport.NewLogTransport(tp, logger, time.Second)

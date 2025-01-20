@@ -56,28 +56,23 @@ func (s *MessageService) List(ctx context.Context) ([]model.Message, error) {
 	return s.messageDao.List(ctx)
 }
 
-func (s *MessageService) Consume(ctx context.Context, id int64, lease string) (model.Message, error) {
+func (s *MessageService) Consume(ctx context.Context, id int64, lease string) error {
 	ctx = dao.WithDB(ctx, s.db)
 
-	rowsAffected, err := s.messageDao.SetStatusAndLease(ctx, id, model.StatusProcessing, lease)
+	rowsAffected, err := s.messageDao.Consume(ctx, id, lease)
 	if err != nil {
-		return model.Message{}, err
+		return err
 	}
 
 	if rowsAffected == 0 {
-		return model.Message{}, fmt.Errorf("no rows affected when consuming message with id %d", id)
+		return fmt.Errorf("no rows affected when consuming message with id %d", id)
 	}
-
-	message, err := s.messageDao.GetByID(ctx, id)
-	if err != nil {
-		return model.Message{}, err
-	}
-	return message, nil
+	return nil
 }
 
 func (s *MessageService) Heartbeat(ctx context.Context, id int64, data model.MessageAttr, lease string) error {
 	ctx = dao.WithDB(ctx, s.db)
-	rowsAffected, err := s.messageDao.SetHeartbeatAndData(ctx, id, data, lease)
+	rowsAffected, err := s.messageDao.Heartbeat(ctx, id, data, lease)
 	if err != nil {
 		return err
 	}
@@ -87,9 +82,9 @@ func (s *MessageService) Heartbeat(ctx context.Context, id int64, data model.Mes
 	return nil
 }
 
-func (s *MessageService) Completed(ctx context.Context, id int64, lease string) error {
+func (s *MessageService) Complete(ctx context.Context, id int64, lease string) error {
 	ctx = dao.WithDB(ctx, s.db)
-	rowsAffected, err := s.messageDao.SetCompleted(ctx, id, lease)
+	rowsAffected, err := s.messageDao.Complete(ctx, id, lease)
 	if err != nil {
 		return err
 	}
@@ -101,7 +96,7 @@ func (s *MessageService) Completed(ctx context.Context, id int64, lease string) 
 
 func (s *MessageService) Failed(ctx context.Context, id int64, lease string, data model.MessageAttr) error {
 	ctx = dao.WithDB(ctx, s.db)
-	rowsAffected, err := s.messageDao.SetFailed(ctx, id, lease, data)
+	rowsAffected, err := s.messageDao.Failed(ctx, id, lease, data)
 	if err != nil {
 		return err
 	}

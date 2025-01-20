@@ -187,7 +187,7 @@ func (mc *MessageController) RegisterRoutes(ws *restful.WebService) {
 		Returns(http.StatusNotFound, "Message not found.", Error{}).
 		Returns(http.StatusBadRequest, "Invalid request format.", Error{}))
 
-	ws.Route(ws.PATCH("/messages/{message_id}/complete").To(mc.Completed).
+	ws.Route(ws.PATCH("/messages/{message_id}/complete").To(mc.Complete).
 		Doc("Set a message as completed by ID.").
 		Operation("setCompleted").
 		Produces(restful.MIME_JSON).
@@ -195,7 +195,7 @@ func (mc *MessageController) RegisterRoutes(ws *restful.WebService) {
 		Param(ws.PathParameter("message_id", "message ID").DataType("integer")).
 		Reads(CompletedRequest{}).
 		Writes(Error{}).
-		Returns(http.StatusNoContent, "Message failed successfully.", nil).
+		Returns(http.StatusNoContent, "Message complete successfully.", nil).
 		Returns(http.StatusBadRequest, "Invalid request format.", Error{}))
 
 	ws.Route(ws.PATCH("/messages/{message_id}/failed").To(mc.Failed).
@@ -453,13 +453,25 @@ func (mc *MessageController) Consume(req *restful.Request, resp *restful.Respons
 		return
 	}
 
-	message, err := mc.messageService.Consume(req.Request.Context(), messageID, completedRequest.Lease)
+	if completedRequest.Lease == "" {
+		resp.WriteHeaderAndEntity(http.StatusBadRequest, Error{Code: "CompletedRequestError", Message: "Lease cannot be empty."})
+		return
+	}
+
+	err = mc.messageService.Consume(req.Request.Context(), messageID, completedRequest.Lease)
 	if err != nil {
 		resp.WriteHeaderAndEntity(http.StatusNotAcceptable, Error{Code: "MessageNotAcceptableError", Message: "Message not found: " + err.Error()})
 		return
 	}
 
-	data := MessageResponse{MessageID: message.MessageID, Content: message.Content, Priority: message.Priority, Status: message.Status, Data: message.Data, LastHeartbeat: message.LastHeartbeat}
+	curr, err := mc.messageService.GetByID(context.Background(), messageID)
+	if err != nil {
+		resp.WriteHeaderAndEntity(http.StatusNotFound, Error{Code: "MessageNotFoundError", Message: "Message not found after heartbeat: " + err.Error()})
+		return
+	}
+
+	data := MessageResponse{MessageID: curr.MessageID, Content: curr.Content, Priority: curr.Priority, Status: curr.Status, Data: curr.Data, LastHeartbeat: curr.LastHeartbeat}
+
 	mc.updateWatchChannel(messageID, data)
 	mc.updateWatchListChannels(data)
 
@@ -477,6 +489,11 @@ func (mc *MessageController) Heartbeat(req *restful.Request, resp *restful.Respo
 	var heartbeatRequest HeartbeatRequest
 	if err := req.ReadEntity(&heartbeatRequest); err != nil {
 		resp.WriteHeaderAndEntity(http.StatusBadRequest, Error{Code: "HeartbeatRequestError", Message: "Failed to read heartbeat request: " + err.Error()})
+		return
+	}
+
+	if heartbeatRequest.Lease == "" {
+		resp.WriteHeaderAndEntity(http.StatusBadRequest, Error{Code: "CompletedRequestError", Message: "Lease cannot be empty."})
 		return
 	}
 
@@ -499,7 +516,7 @@ func (mc *MessageController) Heartbeat(req *restful.Request, resp *restful.Respo
 	resp.WriteHeader(http.StatusNoContent)
 }
 
-func (mc *MessageController) Completed(req *restful.Request, resp *restful.Response) {
+func (mc *MessageController) Complete(req *restful.Request, resp *restful.Response) {
 	messageIDStr := req.PathParameter("message_id")
 	messageID, err := strconv.ParseInt(messageIDStr, 10, 64)
 	if err != nil {
@@ -513,7 +530,12 @@ func (mc *MessageController) Completed(req *restful.Request, resp *restful.Respo
 		return
 	}
 
-	if err := mc.messageService.Completed(req.Request.Context(), messageID, completedRequest.Lease); err != nil {
+	if completedRequest.Lease == "" {
+		resp.WriteHeaderAndEntity(http.StatusBadRequest, Error{Code: "CompletedRequestError", Message: "Lease cannot be empty."})
+		return
+	}
+
+	if err := mc.messageService.Complete(req.Request.Context(), messageID, completedRequest.Lease); err != nil {
 		resp.WriteHeaderAndEntity(http.StatusNotAcceptable, Error{Code: "MessageNotAcceptabledError", Message: "Message not found: " + err.Error()})
 		return
 	}
@@ -543,6 +565,11 @@ func (mc *MessageController) Failed(req *restful.Request, resp *restful.Response
 	var failedRequest FailedRequest
 	if err := req.ReadEntity(&failedRequest); err != nil {
 		resp.WriteHeaderAndEntity(http.StatusBadRequest, Error{Code: "FailedRequestError", Message: "Failed to read failed request: " + err.Error()})
+		return
+	}
+
+	if failedRequest.Lease == "" {
+		resp.WriteHeaderAndEntity(http.StatusBadRequest, Error{Code: "CompletedRequestError", Message: "Lease cannot be empty."})
 		return
 	}
 
@@ -576,6 +603,11 @@ func (mc *MessageController) Cancel(req *restful.Request, resp *restful.Response
 	var cancelRequest CancelRequest
 	if err := req.ReadEntity(&cancelRequest); err != nil {
 		resp.WriteHeaderAndEntity(http.StatusBadRequest, Error{Code: "FailedRequestError", Message: "Failed to read failed request: " + err.Error()})
+		return
+	}
+
+	if cancelRequest.Lease == "" {
+		resp.WriteHeaderAndEntity(http.StatusBadRequest, Error{Code: "CompletedRequestError", Message: "Lease cannot be empty."})
 		return
 	}
 

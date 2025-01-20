@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -31,7 +32,8 @@ func identity() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("unable to get hostname: %w", err)
 	}
-	hnHex := hex.EncodeToString([]byte(hostname))
+	h := sha256.Sum256([]byte(hostname))
+	hnHex := hex.EncodeToString(h[:])
 	return fmt.Sprintf("%s-%d", hnHex[:16], time.Now().Unix()), nil
 }
 
@@ -173,6 +175,7 @@ func (r *Runner) runOnceSync(ctx context.Context, id string, logger *slog.Logger
 
 	var bmMut sync.Mutex
 	var bm []model.Blob
+	var updated bool
 
 	var errCh = make(chan error, 1)
 
@@ -180,6 +183,7 @@ func (r *Runner) runOnceSync(ctx context.Context, id string, logger *slog.Logger
 		errCh <- r.syncManager.ImageWithCallback(ctx, resp.Content, func(blob string, progress, size int64) {
 			bmMut.Lock()
 			defer bmMut.Unlock()
+			updated = true
 			for i, m := range bm {
 				if m.Digest == blob {
 					bm[i].Progress = progress
@@ -202,6 +206,7 @@ func (r *Runner) runOnceSync(ctx context.Context, id string, logger *slog.Logger
 		case <-ticker.C:
 			bmMut.Lock()
 			nbm := append([]model.Blob{}, bm...)
+			updated = false
 			bmMut.Unlock()
 
 			err := r.client.Heartbeat(ctx, resp.MessageID, client.HeartbeatRequest{
@@ -217,6 +222,19 @@ func (r *Runner) runOnceSync(ctx context.Context, id string, logger *slog.Logger
 
 		case err := <-errCh:
 			if err == nil {
+				if updated {
+					err = r.client.Heartbeat(ctx, resp.MessageID, client.HeartbeatRequest{
+						Lease: id,
+						Data: model.MessageAttr{
+							Blobs: bm,
+						},
+					})
+
+					if err != nil {
+						logger.Error("Heartbeat", "error", err)
+					}
+				}
+
 				return r.client.Complete(ctx, resp.MessageID, client.CompletedRequest{
 					Lease: id,
 				})

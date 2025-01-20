@@ -153,7 +153,7 @@ func (m *Message) List(ctx context.Context) ([]model.Message, error) {
 }
 
 const cleanUpSQL = `
-DELETE FROM messages WHERE delete_at IS NOT NULL
+DELETE FROM messages WHERE delete_at IS NOT NULL AND delete_at < NOW() - INTERVAL 8 HOUR
 `
 
 func (m *Message) CleanUp(ctx context.Context) error {
@@ -223,46 +223,44 @@ func (m *Message) GetStale(ctx context.Context) ([]model.Message, error) {
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error occurred during rows iteration: %w", err)
 	}
-
 	return messages, nil
 }
 
-const setStatusAndLeaseSQL = `
+const consumeSQL = `
 UPDATE messages SET status = ?, lease = ? WHERE id = ? AND status = ? AND lease = ? AND delete_at IS NULL
 `
 
-func (m *Message) SetStatusAndLease(ctx context.Context, id int64, status model.MessageStatus, lease string) (int64, error) {
+func (m *Message) Consume(ctx context.Context, id int64, lease string) (int64, error) {
 	db := GetDB(ctx)
-	results, err := db.ExecContext(ctx, setStatusAndLeaseSQL, status, lease, id, model.StatusPending, "")
+	results, err := db.ExecContext(ctx, consumeSQL, model.StatusProcessing, lease, id, model.StatusPending, "")
 	if err != nil {
-		return 0, fmt.Errorf("failed to set status and lease: %w", err)
+		return 0, fmt.Errorf("failed to set consume: %w", err)
 	}
-
 	return results.RowsAffected()
 }
 
-const setHeartbeatAndDataSQL = `
+const heartbeatSQL = `
 UPDATE messages SET last_heartbeat = NOW(), data = ? WHERE id = ? AND lease = ? AND status = ? AND delete_at IS NULL
 `
 
-func (m *Message) SetHeartbeatAndData(ctx context.Context, id int64, data model.MessageAttr, lease string) (int64, error) {
+func (m *Message) Heartbeat(ctx context.Context, id int64, data model.MessageAttr, lease string) (int64, error) {
 	db := GetDB(ctx)
-	results, err := db.ExecContext(ctx, setHeartbeatAndDataSQL, data, id, lease, model.StatusProcessing)
+	results, err := db.ExecContext(ctx, heartbeatSQL, data, id, lease, model.StatusProcessing)
 	if err != nil {
-		return 0, fmt.Errorf("failed to set heartbeat and data: %w", err)
+		return 0, fmt.Errorf("failed to set heartbeat: %w", err)
 	}
 	return results.RowsAffected()
 }
 
-const setCompletedSQL = `
+const completedSQL = `
 UPDATE messages SET status = ?, lease = ? WHERE id = ? AND lease = ? AND status = ? AND delete_at IS NULL
 `
 
-func (m *Message) SetCompleted(ctx context.Context, id int64, lease string) (int64, error) {
+func (m *Message) Complete(ctx context.Context, id int64, lease string) (int64, error) {
 	db := GetDB(ctx)
-	results, err := db.ExecContext(ctx, setCompletedSQL, model.StatusCompleted, "", id, lease, model.StatusProcessing)
+	results, err := db.ExecContext(ctx, completedSQL, model.StatusCompleted, "", id, lease, model.StatusProcessing)
 	if err != nil {
-		return 0, fmt.Errorf("failed to set completed: %w", err)
+		return 0, fmt.Errorf("failed to ser complete: %w", err)
 	}
 	return results.RowsAffected()
 }
@@ -271,11 +269,11 @@ const setFailedSQL = `
 UPDATE messages SET status = ?, lease = ?, data = ? WHERE id = ? AND lease = ? AND status = ? AND delete_at IS NULL
 `
 
-func (m *Message) SetFailed(ctx context.Context, id int64, lease string, data model.MessageAttr) (int64, error) {
+func (m *Message) Failed(ctx context.Context, id int64, lease string, data model.MessageAttr) (int64, error) {
 	db := GetDB(ctx)
 	results, err := db.ExecContext(ctx, setFailedSQL, model.StatusFailed, "", data, id, lease, model.StatusProcessing)
 	if err != nil {
-		return 0, fmt.Errorf("failed to set status, lease, and data: %w", err)
+		return 0, fmt.Errorf("failed to set failed: %w", err)
 	}
 	return results.RowsAffected()
 }
@@ -288,7 +286,7 @@ func (m *Message) Cancel(ctx context.Context, id int64, lease string) (int64, er
 	db := GetDB(ctx)
 	results, err := db.ExecContext(ctx, cancelSQL, "", model.StatusPending, id, lease, model.StatusProcessing)
 	if err != nil {
-		return 0, fmt.Errorf("failed to set status, lease, and data: %w", err)
+		return 0, fmt.Errorf("failed to set cancel: %w", err)
 	}
 	return results.RowsAffected()
 }

@@ -161,8 +161,11 @@ func (c *MessageClient) WatchList(ctx context.Context) (chan MessageResponse, er
 			if err != nil {
 				return
 			}
-
-			messageChannel <- message
+			select {
+			case <-ctx.Done():
+				return
+			case messageChannel <- message:
+			}
 		}
 	}()
 
@@ -232,7 +235,11 @@ func (c *MessageClient) Watch(ctx context.Context, messageID int64) (chan Messag
 			if err != nil {
 				return
 			}
-			messageChannel <- message
+			select {
+			case <-ctx.Done():
+				return
+			case messageChannel <- message:
+			}
 		}
 	}()
 

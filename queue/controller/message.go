@@ -63,7 +63,7 @@ type MessageController struct {
 }
 
 func (mc *MessageController) newWatchChannel(messageID int64) chan MessageResponse {
-	ch := make(chan MessageResponse, 1)
+	ch := make(chan MessageResponse, 8)
 	mc.watchChannelsMut.Lock()
 	defer mc.watchChannelsMut.Unlock()
 	mc.watchChannels[messageID] = append(mc.watchChannels[messageID], ch)
@@ -98,7 +98,7 @@ func (mc *MessageController) updateWatchChannel(messageID int64, mr MessageRespo
 }
 
 func (mc *MessageController) newWatchListChannel() chan MessageResponse {
-	ch := make(chan MessageResponse, 1)
+	ch := make(chan MessageResponse, 32)
 	mc.watchListChannelsMut.Lock()
 	defer mc.watchListChannelsMut.Unlock()
 	mc.watchListChannels = append(mc.watchListChannels, ch)
@@ -239,7 +239,7 @@ func (mc *MessageController) Schedule(ctx context.Context, logger *slog.Logger) 
 					if err != nil {
 						logger.Error("ResetToPending", "error", err)
 					} else {
-						data := MessageResponse{MessageID: item.MessageID, Content: item.Content, Priority: item.Priority, Status: item.Status, Data: item.Data, LastHeartbeat: item.LastHeartbeat}
+						data := MessageResponse{MessageID: item.MessageID, Content: item.Content, Priority: item.Priority, Status: model.StatusPending}
 						mc.updateWatchListChannels(data)
 						mc.updateWatchChannel(item.MessageID, data)
 					}

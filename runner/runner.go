@@ -78,7 +78,7 @@ func (r *Runner) sync(ctx context.Context, id string, logger *slog.Logger) {
 	for i := 0; ctx.Err() == nil; i++ {
 		if err := r.runOnceSync(context.Background(), id, logger); err != nil {
 			if err != errWait {
-				logger.Error("sync", "error", err)
+				logger.Warn("sync", "error", err)
 			} else {
 				select {
 				case <-r.syncCh:

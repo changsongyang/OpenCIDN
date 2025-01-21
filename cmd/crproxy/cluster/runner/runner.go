@@ -2,6 +2,8 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +30,8 @@ type flagpole struct {
 	Quick      bool
 	Platform   []string
 	Userpass   []string
+
+	Lease string
 
 	Duration time.Duration
 }
@@ -58,7 +62,8 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().StringSliceVar(&flags.Platform, "platform", flags.Platform, "Platform")
 	cmd.Flags().StringArrayVarP(&flags.Userpass, "user", "u", flags.Userpass, "host and username and password -u user:pwd@host")
 
-	cmd.Flags().DurationVar(&flags.Duration, "duration", flags.Duration, "Duration of the running")
+	cmd.Flags().DurationVar(&flags.Duration, "duration", flags.Duration, "Duration of the runner")
+	cmd.Flags().StringVar(&flags.Lease, "lease", flags.Lease, "Lease of the runner")
 
 	return cmd
 }
@@ -110,7 +115,17 @@ func runE(ctx context.Context, flags *flagpole) error {
 		return fmt.Errorf("create sync manager failed: %w", err)
 	}
 
-	runner, err := runner.NewRunner(http.DefaultClient, flags.QueueURL, flags.AdminToken, sm)
+	var lease string
+	if flags.Lease == "" {
+		lease, err = identity()
+		if err != nil {
+			return err
+		}
+	} else {
+		lease = fmt.Sprintf("%s-%d", flags.Lease, time.Now().Unix())
+	}
+
+	runner, err := runner.NewRunner(http.DefaultClient, lease, flags.QueueURL, flags.AdminToken, sm)
 	if err != nil {
 		return err
 	}
@@ -141,4 +156,14 @@ func filterPlatform(ps []string) func(pf manifestlist.PlatformSpec) bool {
 		}
 		return false
 	}
+}
+
+func identity() (string, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return "", fmt.Errorf("unable to get hostname: %w", err)
+	}
+	h := sha256.Sum256([]byte(hostname))
+	hnHex := hex.EncodeToString(h[:])
+	return fmt.Sprintf("%s-%d", hnHex[:16], time.Now().Unix()), nil
 }

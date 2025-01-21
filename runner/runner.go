@@ -2,13 +2,10 @@ package runner
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"sort"
 	"sync"
 	"time"
@@ -27,26 +24,11 @@ type Runner struct {
 	syncCh      chan struct{}
 }
 
-func identity() (string, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return "", fmt.Errorf("unable to get hostname: %w", err)
-	}
-	h := sha256.Sum256([]byte(hostname))
-	hnHex := hex.EncodeToString(h[:])
-	return fmt.Sprintf("%s-%d", hnHex[:16], time.Now().Unix()), nil
-}
-
-func NewRunner(httpClient *http.Client, baseURL string, adminToken string, syncManager *csync.SyncManager) (*Runner, error) {
-	id, err := identity()
-	if err != nil {
-		return nil, err
-	}
+func NewRunner(httpClient *http.Client, lease, baseURL string, adminToken string, syncManager *csync.SyncManager) (*Runner, error) {
 	cli := client.NewMessageClient(httpClient, baseURL, adminToken)
-
 	return &Runner{
 		client:      cli,
-		lease:       id,
+		lease:       lease,
 		syncManager: syncManager,
 		pending:     make(map[int64]client.MessageResponse),
 		syncCh:      make(chan struct{}),

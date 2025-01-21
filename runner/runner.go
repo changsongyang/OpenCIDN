@@ -173,6 +173,16 @@ func (r *Runner) runOnceSync(ctx context.Context, id string, logger *slog.Logger
 		return errors.Join(errs...)
 	}
 
+	err = r.client.Heartbeat(ctx, resp.MessageID, client.HeartbeatRequest{
+		Lease: id,
+	})
+	if err != nil {
+		_ = r.client.Cancel(ctx, resp.MessageID, client.CancelRequest{
+			Lease: id,
+		})
+		return err
+	}
+
 	var bmMut sync.Mutex
 	var bm []model.Blob
 	var updated bool

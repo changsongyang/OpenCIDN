@@ -92,7 +92,7 @@ func (mc *MessageController) updateWatchChannel(messageID int64, mr MessageRespo
 	for _, ch := range mc.watchChannels[messageID] {
 		select {
 		case ch <- mr:
-		default:
+		case <-time.After(time.Second / 10):
 		}
 	}
 }
@@ -122,7 +122,7 @@ func (mc *MessageController) updateWatchListChannels(mr MessageResponse) {
 	for _, ch := range mc.watchListChannels {
 		select {
 		case ch <- mr:
-		default:
+		case <-time.After(time.Second / 10):
 		}
 	}
 }

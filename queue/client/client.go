@@ -146,7 +146,18 @@ func (c *MessageClient) WatchList(ctx context.Context) (chan MessageResponse, er
 
 	if resp.Header.Get("Content-Type") != "text/event-stream" {
 		defer resp.Body.Close()
-		return nil, handleErrorResponse(resp)
+
+		decoder := json.NewDecoder(resp.Body)
+		var message MessageResponse
+		err := decoder.Decode(&message)
+		if err != nil {
+			return nil, err
+		}
+
+		messageChannel := make(chan MessageResponse, 1)
+		messageChannel <- message
+		close(messageChannel)
+		return messageChannel, nil
 	}
 
 	messageChannel := make(chan MessageResponse)
@@ -220,7 +231,18 @@ func (c *MessageClient) Watch(ctx context.Context, messageID int64) (chan Messag
 
 	if resp.Header.Get("Content-Type") != "text/event-stream" {
 		defer resp.Body.Close()
-		return nil, handleErrorResponse(resp)
+
+		decoder := json.NewDecoder(resp.Body)
+		var message MessageResponse
+		err := decoder.Decode(&message)
+		if err != nil {
+			return nil, err
+		}
+
+		messageChannel := make(chan MessageResponse, 1)
+		messageChannel <- message
+		close(messageChannel)
+		return messageChannel, nil
 	}
 
 	messageChannel := make(chan MessageResponse)

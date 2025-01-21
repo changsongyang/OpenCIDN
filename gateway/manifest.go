@@ -43,7 +43,7 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 	if done {
 		return
 	}
-	if fallback {
+	if fallback && c.recacheMaxWait > 0 {
 		ctx, cancel = context.WithTimeout(ctx, c.recacheMaxWait)
 		defer cancel()
 	}
@@ -66,23 +66,29 @@ func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request,
 }
 
 func (c *Gateway) waitingQueue(ctx context.Context, msg string, weight int) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	mr, err := c.queueClient.Create(ctx, msg, weight+1)
 	if err != nil {
 		return fmt.Errorf("failed to create queue: %w", err)
 	}
 
 	if mr.Status == model.StatusPending {
+		c.logger.Info("watching message from queue", "msg", msg)
+
 		chMr, err := c.queueClient.Watch(ctx, mr.MessageID)
 		if err != nil {
 			return fmt.Errorf("failed to watch message: %w", err)
 		}
-		c.logger.Info("Watching message in queue", "msg", msg)
 	watiQueue:
 		for {
 			select {
+			case <-ctx.Done():
+				return ctx.Err()
 			case m, ok := <-chMr:
 				if !ok {
-					if m.Status != model.StatusPending {
+					if mr.Status != model.StatusPending && mr.Status != model.StatusProcessing {
 						break watiQueue
 					}
 
@@ -94,9 +100,6 @@ func (c *Gateway) waitingQueue(ctx context.Context, msg string, weight int) erro
 				} else {
 					mr = m
 				}
-
-			case <-ctx.Done():
-				return ctx.Err()
 			}
 		}
 	}
@@ -156,21 +159,23 @@ func (c *Gateway) cacheManifest(info *PathInfo, weight int) (int, error) {
 		if c.queueClient != nil {
 			cachedDigest, err := c.cache.DigestManifest(ctx, info.Host, info.Image, info.Manifests)
 			if err == nil {
-				if cachedDigest != digest {
-					msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
-					_, err := c.queueClient.Create(context.Background(), msg, 0)
-					if err != nil {
-						c.logger.Warn("failed add message to queue", "msg", msg, "digest", digest, "error", err)
-					} else {
-						c.logger.Info("Add message to queue", "msg", msg, "digest", digest)
+				_, err := c.cache.StatBlob(ctx, cachedDigest)
+				if err == nil {
+					if cachedDigest != digest {
+						msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
+						_, err := c.queueClient.Create(context.Background(), msg, 0)
+						if err != nil {
+							c.logger.Warn("failed add message to queue", "msg", msg, "digest", digest, "error", err)
+						} else {
+							c.logger.Info("Add message to queue", "msg", msg, "digest", digest)
+						}
+						digest = cachedDigest
 					}
-					digest = cachedDigest
+					c.manifestCache.Put(info, cacheValue{
+						Digest: digest,
+					})
+					return 0, nil
 				}
-
-				c.manifestCache.Put(info, cacheValue{
-					Digest: digest,
-				})
-				return 0, nil
 			}
 		}
 
@@ -285,7 +290,7 @@ func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Re
 		}
 
 		if val.MediaType == "" || val.Length == "" {
-			return c.serveCachedManifest(rw, r, info, true, "hit"), false
+			return c.serveCachedManifest(rw, r, info, true, "hit and mark"), false
 		}
 
 		if r.Method == http.MethodHead {
@@ -322,7 +327,7 @@ func (c *Gateway) missServeCachedManifest(rw http.ResponseWriter, r *http.Reques
 		}
 
 		if val.MediaType == "" || val.Length == "" {
-			return c.serveCachedManifest(rw, r, info, true, "miss")
+			return c.serveCachedManifest(rw, r, info, true, "miss and mark")
 		}
 
 		if r.Method == http.MethodHead {

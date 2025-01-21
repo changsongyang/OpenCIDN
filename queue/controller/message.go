@@ -388,20 +388,21 @@ func (mc *MessageController) Get(req *restful.Request, resp *restful.Response) {
 		return
 	}
 
-	message, err := mc.messageService.GetByID(req.Request.Context(), messageID)
+	curr, err := mc.messageService.GetByID(req.Request.Context(), messageID)
 	if err != nil {
 		resp.WriteHeaderAndEntity(http.StatusNotFound, Error{Code: "MessageNotFoundError", Message: "Message not found: " + err.Error()})
 		return
 	}
 
-	if message.Status != model.StatusProcessing && message.Status != model.StatusPending {
-		resp.WriteHeaderAndEntity(http.StatusOK, MessageResponse{MessageID: message.MessageID, Content: message.Content, Priority: message.Priority, Status: message.Status, Data: message.Data, LastHeartbeat: message.LastHeartbeat})
+	data := MessageResponse{MessageID: curr.MessageID, Content: curr.Content, Priority: curr.Priority, Status: curr.Status, Data: curr.Data, LastHeartbeat: curr.LastHeartbeat}
+	watch, _ := strconv.ParseBool(req.QueryParameter("watch"))
+	if !watch {
+		resp.WriteHeaderAndEntity(http.StatusOK, data)
 		return
 	}
 
-	watch, _ := strconv.ParseBool(req.QueryParameter("watch"))
-	if !watch {
-		resp.WriteHeaderAndEntity(http.StatusOK, MessageResponse{MessageID: message.MessageID, Content: message.Content, Priority: message.Priority, Status: message.Status, Data: message.Data, LastHeartbeat: message.LastHeartbeat})
+	if data.Status != model.StatusProcessing && data.Status != model.StatusPending {
+		resp.WriteHeaderAndEntity(http.StatusOK, data)
 		return
 	}
 
@@ -415,7 +416,7 @@ func (mc *MessageController) Get(req *restful.Request, resp *restful.Response) {
 	watchCh := mc.newWatchChannel(messageID)
 	defer mc.cancelWatchChannel(messageID, watchCh)
 
-	mc.updateWatchChannel(messageID, MessageResponse{MessageID: message.MessageID, Content: message.Content, Priority: message.Priority, Status: message.Status, Data: message.Data, LastHeartbeat: message.LastHeartbeat})
+	mc.updateWatchChannel(messageID, data)
 
 	encoder := json.NewEncoder(resp.ResponseWriter)
 

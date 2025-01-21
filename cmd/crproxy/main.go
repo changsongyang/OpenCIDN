@@ -6,6 +6,7 @@ import (
 
 	"github.com/daocloud/crproxy/cmd/crproxy/cluster"
 	csync "github.com/daocloud/crproxy/cmd/crproxy/sync"
+	"github.com/daocloud/crproxy/internal/signals"
 	"github.com/spf13/cobra"
 
 	_ "github.com/daocloud/crproxy/storage/driver/obs"
@@ -26,11 +27,11 @@ var (
 			return cmd.Usage()
 		},
 	}
-	pflag = cmd.Flags()
 )
 
 func main() {
-	err := cmd.Execute()
+	ctx := signals.SetupSignalContext()
+	err := cmd.ExecuteContext(ctx)
 	if err != nil {
 		slog.Error("execute failed", "error", err)
 		os.Exit(1)

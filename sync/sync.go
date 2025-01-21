@@ -240,6 +240,7 @@ func (c *SyncManager) ImageWithCallback(ctx context.Context, image string, blobF
 				_, err := cache.PutBlob(ctx, blob, pr)
 				if err != nil {
 					c.logger.Error("put blob failed", "image", image, "digest", dgst, "platform", pf, "error", err)
+					io.Copy(io.Discard, pr)
 					return
 				}
 			}(ca, pr)

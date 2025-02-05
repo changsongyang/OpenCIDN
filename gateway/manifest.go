@@ -187,34 +187,7 @@ func (c *Gateway) cacheManifest(info *PathInfo, weight int) (int, error) {
 			})
 			return 0, nil
 		}
-
-		if c.queueClient != nil {
-			msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
-			err = c.waitingQueue(ctx, msg, weight)
-			if err != nil {
-				c.logger.Error("waiting queue", "msg", msg, "digest", digest, "weight", weight, "error", err)
-			} else {
-				c.manifestCache.Put(info, cacheValue{
-					Digest: digest,
-				})
-				return 0, nil
-			}
-		}
 		u.Path = fmt.Sprintf("/v2/%s/manifests/%s", info.Image, digest)
-	} else {
-		if c.queueClient != nil {
-			msg := fmt.Sprintf("%s/%s@%s", info.Host, info.Image, info.Manifests)
-			digest := info.Manifests
-			err := c.waitingQueue(ctx, msg, weight)
-			if err != nil {
-				c.logger.Error("waiting queue", "msg", msg, "digest", digest, "weight", weight, "error", err)
-			} else {
-				c.manifestCache.Put(info, cacheValue{
-					Digest: digest,
-				})
-				return 0, nil
-			}
-		}
 	}
 
 	forwardReq, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -278,6 +251,39 @@ func (c *Gateway) cacheManifest(info *PathInfo, weight int) (int, error) {
 		MediaType: mediaType,
 		Length:    strconv.FormatInt(size, 10),
 	})
+
+	if c.queueClient != nil {
+		ml := manifestLayers{}
+		json.Unmarshal(body, &ml)
+
+		if len(ml.Layers) != 0 {
+			for _, l := range ml.Layers {
+				if l.Digest == "" {
+					continue
+				}
+				_, err := c.queueClient.Create(context.Background(), l.Digest, 0, model.MessageAttr{
+					Host:  info.Host,
+					Image: info.Image,
+					Size:  l.Size,
+				})
+				if err != nil {
+					c.logger.Warn("failed add blob message to queue", "digest", digest, "error", err)
+				}
+			}
+			l := ml.Config
+			if l.Digest != "" {
+
+				_, err := c.queueClient.Create(context.Background(), l.Digest, 0, model.MessageAttr{
+					Host:  info.Host,
+					Image: info.Image,
+					Size:  l.Size,
+				})
+				if err != nil {
+					c.logger.Warn("failed add blob message to queue", "digest", digest, "error", err)
+				}
+			}
+		}
+	}
 	return 0, nil
 }
 
@@ -377,4 +383,15 @@ func (c *Gateway) serveCachedManifest(rw http.ResponseWriter, r *http.Request, i
 	}
 
 	return true
+}
+
+type manifestLayers struct {
+	Config layer   `json:"config"`
+	Layers []layer `json:"layers"`
+}
+
+type layer struct {
+	MediaType string `json:"mediaType"`
+	Size      int64  `json:"size"`
+	Digest    string `json:"digest"`
 }

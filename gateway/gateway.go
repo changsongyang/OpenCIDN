@@ -171,13 +171,20 @@ func NewGateway(opts ...Option) (*Gateway, error) {
 	}
 
 	if c.cache != nil {
-		a, err := agent.NewAgent(
+		opts := []agent.Option{
 			agent.WithClient(c.httpClient),
 			agent.WithAuthenticator(c.authenticator),
 			agent.WithLogger(c.logger),
 			agent.WithCache(c.cache),
 			agent.WithBlobsLENoAgent(c.blobsLENoAgent),
 			agent.WithConcurrency(c.concurrency),
+		}
+		if c.queueClient != nil {
+			opts = append(opts, agent.WithQueueClient(c.queueClient))
+		}
+
+		a, err := agent.NewAgent(
+			opts...,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create agent: %w", err)

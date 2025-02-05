@@ -19,6 +19,8 @@ import (
 type MessageRequest struct {
 	Content  string `json:"content"`
 	Priority int    `json:"priority"`
+
+	Data model.MessageAttr `json:"data,omitempty"`
 }
 
 type MessageResponse struct {
@@ -304,6 +306,7 @@ func (mc *MessageController) Create(req *restful.Request, resp *restful.Response
 	newMessage := model.Message{
 		Content:  messageRequest.Content,
 		Priority: messageRequest.Priority,
+		Data:     messageRequest.Data,
 	}
 	messageID, err := mc.messageService.Create(req.Request.Context(), newMessage)
 	if err != nil {
@@ -315,6 +318,7 @@ func (mc *MessageController) Create(req *restful.Request, resp *restful.Response
 		MessageID: messageID,
 		Content:   messageRequest.Content,
 		Priority:  messageRequest.Priority,
+		Data:      messageRequest.Data,
 	}
 
 	mc.updateWatchListChannels(data)
@@ -498,14 +502,18 @@ func (mc *MessageController) Heartbeat(req *restful.Request, resp *restful.Respo
 		return
 	}
 
-	if err := mc.messageService.Heartbeat(req.Request.Context(), messageID, heartbeatRequest.Data, heartbeatRequest.Lease); err != nil {
-		resp.WriteHeaderAndEntity(http.StatusNotAcceptable, Error{Code: "MessageNotAcceptableError", Message: "Message not found: " + err.Error()})
+	curr, err := mc.messageService.GetByID(req.Request.Context(), messageID)
+	if err != nil {
+		resp.WriteHeaderAndEntity(http.StatusNotFound, Error{Code: "MessageNotFoundError", Message: "Message not found after heartbeat: " + err.Error()})
 		return
 	}
 
-	curr, err := mc.messageService.GetByID(context.Background(), messageID)
-	if err != nil {
-		resp.WriteHeaderAndEntity(http.StatusNotFound, Error{Code: "MessageNotFoundError", Message: "Message not found after heartbeat: " + err.Error()})
+	curr.Data.Blobs = heartbeatRequest.Data.Blobs
+	curr.Data.Progress = heartbeatRequest.Data.Progress
+	curr.Data.Size = heartbeatRequest.Data.Size
+
+	if err := mc.messageService.Heartbeat(req.Request.Context(), messageID, curr.Data, heartbeatRequest.Lease); err != nil {
+		resp.WriteHeaderAndEntity(http.StatusNotAcceptable, Error{Code: "MessageNotAcceptableError", Message: "Message not found: " + err.Error()})
 		return
 	}
 
@@ -574,12 +582,20 @@ func (mc *MessageController) Failed(req *restful.Request, resp *restful.Response
 		return
 	}
 
-	if err := mc.messageService.Failed(req.Request.Context(), messageID, failedRequest.Lease, failedRequest.Data); err != nil {
+	curr, err := mc.messageService.GetByID(context.Background(), messageID)
+	if err != nil {
+		resp.WriteHeaderAndEntity(http.StatusNotFound, Error{Code: "MessageNotFoundError", Message: "Message not found after heartbeat: " + err.Error()})
+		return
+	}
+
+	curr.Data.Error = failedRequest.Data.Error
+
+	if err := mc.messageService.Failed(req.Request.Context(), messageID, failedRequest.Lease, curr.Data); err != nil {
 		resp.WriteHeaderAndEntity(http.StatusNotAcceptable, Error{Code: "MessageNotAcceptableError", Message: "Message not found: " + err.Error()})
 		return
 	}
 
-	curr, err := mc.messageService.GetByID(context.Background(), messageID)
+	curr, err = mc.messageService.GetByID(context.Background(), messageID)
 	if err != nil {
 		resp.WriteHeaderAndEntity(http.StatusNotFound, Error{Code: "MessageNotFoundError", Message: "Message not found after failure: " + err.Error()})
 		return

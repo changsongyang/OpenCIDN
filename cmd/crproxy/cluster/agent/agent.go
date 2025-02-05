@@ -14,6 +14,7 @@ import (
 	"github.com/daocloud/crproxy/cache"
 	"github.com/daocloud/crproxy/internal/pki"
 	"github.com/daocloud/crproxy/internal/server"
+	"github.com/daocloud/crproxy/queue/client"
 	"github.com/daocloud/crproxy/signing"
 	"github.com/daocloud/crproxy/storage"
 	"github.com/daocloud/crproxy/token"
@@ -47,6 +48,9 @@ type flagpole struct {
 	BlobCacheDuration time.Duration
 
 	Concurrency int
+
+	QueueURL   string
+	QueueToken string
 }
 
 func NewCommand() *cobra.Command {
@@ -131,6 +135,11 @@ func runE(ctx context.Context, flags *flagpole) error {
 		agent.WithBlobCacheDuration(flags.BlobCacheDuration),
 		agent.WithConcurrency(flags.Concurrency),
 	)
+
+	if flags.QueueURL != "" {
+		queueClient := client.NewMessageClient(http.DefaultClient, flags.QueueURL, flags.QueueToken)
+		opts = append(opts, agent.WithQueueClient(queueClient))
+	}
 
 	if flags.TokenPublicKeyFile != "" {
 		publicKeyData, err := os.ReadFile(flags.TokenPublicKeyFile)

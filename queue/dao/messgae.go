@@ -44,7 +44,7 @@ INSERT INTO messages (content, lease, priority, status, data) VALUES (?, ?, ?, ?
 
 func (m *Message) Create(ctx context.Context, message model.Message) (int64, error) {
 	db := GetDB(ctx)
-	result, err := db.ExecContext(ctx, createMessageSQL, message.Content, message.Lease, message.Priority, model.StatusPending, "{}")
+	result, err := db.ExecContext(ctx, createMessageSQL, message.Content, message.Lease, message.Priority, model.StatusPending, message.Data)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create message: %w", err)
 	}
@@ -112,12 +112,12 @@ func (m *Message) UpdatePriorityByID(ctx context.Context, id int64, priority int
 }
 
 const deleteMessageByIDSQL = `
-UPDATE messages SET delete_at = NOW(), data = ? WHERE id = ? AND delete_at IS NULL
+UPDATE messages SET delete_at = NOW() WHERE id = ? AND delete_at IS NULL
 `
 
 func (m *Message) DeleteByID(ctx context.Context, id int64) error {
 	db := GetDB(ctx)
-	_, err := db.ExecContext(ctx, deleteMessageByIDSQL, model.MessageAttr{}, id)
+	_, err := db.ExecContext(ctx, deleteMessageByIDSQL, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete message: %w", err)
 	}

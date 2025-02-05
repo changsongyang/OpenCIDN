@@ -4,18 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/daocloud/crproxy/cache"
 	"github.com/daocloud/crproxy/queue/client"
 	"github.com/daocloud/crproxy/queue/model"
 	csync "github.com/daocloud/crproxy/sync"
 )
 
 type Runner struct {
+	caches      []*cache.Cache
+	httpClient  *http.Client
 	client      *client.MessageClient
 	syncManager *csync.SyncManager
 	lease       string
@@ -24,9 +31,11 @@ type Runner struct {
 	syncCh      chan struct{}
 }
 
-func NewRunner(httpClient *http.Client, lease, baseURL string, adminToken string, syncManager *csync.SyncManager) (*Runner, error) {
+func NewRunner(httpClient *http.Client, caches []*cache.Cache, lease, baseURL string, adminToken string, syncManager *csync.SyncManager) (*Runner, error) {
 	cli := client.NewMessageClient(httpClient, baseURL, adminToken)
 	return &Runner{
+		httpClient:  httpClient,
+		caches:      caches,
 		client:      cli,
 		lease:       lease,
 		syncManager: syncManager,
@@ -155,7 +164,196 @@ func (r *Runner) runOnceSync(ctx context.Context, id string, logger *slog.Logger
 		return errors.Join(errs...)
 	}
 
-	err = r.client.Heartbeat(ctx, resp.MessageID, client.HeartbeatRequest{
+	if strings.HasPrefix(resp.Content, "sha256:") {
+		if resp.Data.Host == "" || resp.Data.Image == "" {
+			return nil
+		}
+		return r.blobSync(ctx, id, resp, logger)
+	}
+
+	return r.imageSync(ctx, id, resp, logger)
+}
+
+func (r *Runner) blob(ctx context.Context, host, name, blob string, size int64, gotSize, progress *atomic.Int64, logger *slog.Logger) error {
+	var subCaches []*cache.Cache
+	for _, cache := range r.caches {
+		stat, err := cache.StatBlob(ctx, blob)
+		if err == nil {
+			if size > 0 {
+				gotSize := stat.Size()
+				if size == gotSize {
+					continue
+				}
+				logger.Error("size is not meeting expectations", "digest", blob, "size", size, "gotSize", gotSize)
+			} else {
+				continue
+			}
+		}
+		subCaches = append(subCaches, cache)
+	}
+
+	if len(subCaches) == 0 {
+		logger.Info("skip blob by cache", "digest", blob)
+		return nil
+	}
+
+	u := &url.URL{
+		Scheme: "https",
+		Host:   host,
+		Path:   fmt.Sprintf("/v2/%s/blobs/%s", name, blob),
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to retrieve blob: status code %d", resp.StatusCode)
+	}
+
+	logger.Info("start sync blob", "digest", blob, "url", u.String())
+
+	if resp.ContentLength > 0 && size > 0 {
+		if resp.ContentLength != size {
+			return fmt.Errorf("failed to retrieve blob: expected size %d, got %d", size, resp.ContentLength)
+		}
+	}
+
+	if size > 0 {
+		gotSize.Store(size)
+	}
+	if resp.ContentLength > 0 {
+		gotSize.Store(resp.ContentLength)
+	}
+
+	body := &readerCounter{
+		r:       resp.Body,
+		counter: progress,
+	}
+
+	if len(subCaches) == 1 {
+		n, err := subCaches[0].PutBlob(ctx, blob, body)
+		if err != nil {
+			return fmt.Errorf("put blob failed: %w", err)
+		}
+
+		logger.Info("finish sync blob", "digest", blob, "size", n)
+		return nil
+	}
+
+	var writers []io.Writer
+	var closers []io.Closer
+	var wg sync.WaitGroup
+
+	for _, ca := range subCaches {
+		pr, pw := io.Pipe()
+		writers = append(writers, pw)
+		closers = append(closers, pw)
+		wg.Add(1)
+		go func(cache *cache.Cache, pr io.Reader) {
+			defer wg.Done()
+			_, err := cache.PutBlob(ctx, blob, pr)
+			if err != nil {
+				logger.Error("put blob failed", "digest", blob, "error", err)
+				io.Copy(io.Discard, pr)
+				return
+			}
+		}(ca, pr)
+	}
+
+	n, err := io.Copy(io.MultiWriter(writers...), body)
+	if err != nil {
+		return fmt.Errorf("copy blob failed: %w", err)
+	}
+	for _, c := range closers {
+		c.Close()
+	}
+
+	wg.Wait()
+
+	logger.Info("finish sync blob", "digest", blob, "size", n)
+	return nil
+}
+
+func (r *Runner) blobSync(ctx context.Context, id string, resp client.MessageResponse, logger *slog.Logger) error {
+	err := r.client.Heartbeat(ctx, resp.MessageID, client.HeartbeatRequest{
+		Lease: id,
+	})
+	if err != nil {
+		_ = r.client.Cancel(ctx, resp.MessageID, client.CancelRequest{
+			Lease: id,
+		})
+		return err
+	}
+
+	var errCh = make(chan error, 1)
+	d := resp.Data
+
+	var gotSize, progress atomic.Int64
+
+	go func() {
+		errCh <- r.blob(ctx, d.Host, d.Image, resp.Content, d.Size, &gotSize, &progress, logger)
+	}()
+
+	ticker := time.NewTicker(10 * time.Second)
+
+	for {
+		select {
+		case <-ticker.C:
+			err := r.client.Heartbeat(ctx, resp.MessageID, client.HeartbeatRequest{
+				Lease: id,
+				Data: model.MessageAttr{
+					Size:     gotSize.Load(),
+					Progress: progress.Load(),
+				},
+			})
+
+			if err != nil {
+				logger.Error("Heartbeat", "error", err)
+			}
+
+		case err := <-errCh:
+			if err == nil {
+				_ = r.client.Heartbeat(ctx, resp.MessageID, client.HeartbeatRequest{
+					Lease: id,
+					Data: model.MessageAttr{
+						Size:     gotSize.Load(),
+						Progress: progress.Load(),
+					},
+				})
+				return r.client.Complete(ctx, resp.MessageID, client.CompletedRequest{
+					Lease: id,
+				})
+			}
+
+			if errors.Is(err, context.Canceled) {
+				return r.client.Cancel(ctx, resp.MessageID, client.CancelRequest{
+					Lease: id,
+				})
+			}
+
+			return r.client.Failed(ctx, resp.MessageID, client.FailedRequest{
+				Lease: id,
+				Data: model.MessageAttr{
+					Error: err.Error(),
+				},
+			})
+		case <-ctx.Done():
+			return r.client.Cancel(ctx, resp.MessageID, client.CancelRequest{
+				Lease: id,
+			})
+		}
+	}
+}
+
+func (r *Runner) imageSync(ctx context.Context, id string, resp client.MessageResponse, logger *slog.Logger) error {
+	err := r.client.Heartbeat(ctx, resp.MessageID, client.HeartbeatRequest{
 		Lease: id,
 	})
 	if err != nil {
@@ -250,4 +448,16 @@ func (r *Runner) runOnceSync(ctx context.Context, id string, logger *slog.Logger
 			})
 		}
 	}
+}
+
+type readerCounter struct {
+	r       io.Reader
+	counter *atomic.Int64
+}
+
+func (r *readerCounter) Read(b []byte) (int, error) {
+	n, err := r.r.Read(b)
+
+	r.counter.Add(int64(n))
+	return n, err
 }

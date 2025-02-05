@@ -16,6 +16,8 @@ import (
 type MessageRequest struct {
 	Content  string `json:"content"`
 	Priority int    `json:"priority"`
+
+	Data model.MessageAttr `json:"data,omitempty"`
 }
 
 type MessageResponse struct {
@@ -63,8 +65,8 @@ func NewMessageClient(httpClient *http.Client, baseURL string, adminToken string
 	}
 }
 
-func (c *MessageClient) Create(ctx context.Context, content string, priority int) (MessageResponse, error) {
-	messageRequest := MessageRequest{Content: content, Priority: priority}
+func (c *MessageClient) Create(ctx context.Context, content string, priority int, data model.MessageAttr) (MessageResponse, error) {
+	messageRequest := MessageRequest{Content: content, Priority: priority, Data: data}
 	body, err := json.Marshal(messageRequest)
 	if err != nil {
 		return MessageResponse{}, err

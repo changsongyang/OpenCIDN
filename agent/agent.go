@@ -16,6 +16,8 @@ import (
 	"github.com/daocloud/crproxy/cache"
 	"github.com/daocloud/crproxy/internal/queue"
 	"github.com/daocloud/crproxy/internal/utils"
+	"github.com/daocloud/crproxy/queue/client"
+	"github.com/daocloud/crproxy/queue/model"
 	"github.com/daocloud/crproxy/token"
 	"github.com/docker/distribution/registry/api/errcode"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
@@ -53,6 +55,8 @@ type Agent struct {
 	authenticator     *token.Authenticator
 
 	blobsLENoAgent int
+
+	queueClient *client.MessageClient
 }
 
 type Option func(c *Agent) error
@@ -108,6 +112,13 @@ func WithConcurrency(concurrency int) Option {
 			concurrency = 1
 		}
 		c.concurrency = concurrency
+		return nil
+	}
+}
+
+func WithQueueClient(queueClient *client.MessageClient) Option {
+	return func(c *Agent) error {
+		c.queueClient = queueClient
 		return nil
 	}
 }
@@ -181,6 +192,15 @@ func (c *Agent) worker(ctx context.Context) {
 		info, weight, finish, ok := c.queue.GetOrWaitWithDone(ctx.Done())
 		if !ok {
 			return
+		}
+
+		if c.queueClient != nil {
+			_, err := c.waitingQueue(ctx, info.Blobs, weight, &info)
+			if err == nil {
+				finish()
+				continue
+			}
+			c.logger.Warn("waitingQueue error", "info", info, "error", err)
 		}
 		size, continueFunc, sc, err := c.cacheBlob(&info)
 		if err != nil {
@@ -488,4 +508,56 @@ func (c *Agent) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob st
 
 	c.logger.Info("Cache hit", "digest", blob, "url", u)
 	http.Redirect(rw, r, u, http.StatusTemporaryRedirect)
+}
+
+func (c *Agent) waitingQueue(ctx context.Context, msg string, weight int, info *BlobInfo) (client.MessageResponse, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	mr, err := c.queueClient.Create(ctx, msg, weight+1, model.MessageAttr{
+		Host:  info.Host,
+		Image: info.Image,
+	})
+	if err != nil {
+		return client.MessageResponse{}, fmt.Errorf("failed to create queue: %w", err)
+	}
+
+	if mr.Status == model.StatusPending {
+		c.logger.Info("watching message from queue", "msg", msg)
+
+		chMr, err := c.queueClient.Watch(ctx, mr.MessageID)
+		if err != nil {
+			return client.MessageResponse{}, fmt.Errorf("failed to watch message: %w", err)
+		}
+	watiQueue:
+		for {
+			select {
+			case <-ctx.Done():
+				return client.MessageResponse{}, ctx.Err()
+			case m, ok := <-chMr:
+				if !ok {
+					if mr.Status != model.StatusPending && mr.Status != model.StatusProcessing {
+						break watiQueue
+					}
+
+					time.Sleep(1 * time.Second)
+					chMr, err = c.queueClient.Watch(ctx, mr.MessageID)
+					if err != nil {
+						return client.MessageResponse{}, fmt.Errorf("failed to re-watch message: %w", err)
+					}
+				} else {
+					mr = m
+				}
+			}
+		}
+	}
+
+	switch mr.Status {
+	case model.StatusCompleted:
+		return mr, nil
+	case model.StatusFailed:
+		return client.MessageResponse{}, fmt.Errorf("%q Queue Error: %s", msg, mr.Data.Error)
+	default:
+		return client.MessageResponse{}, fmt.Errorf("unexpected status %q for message %q", mr.Status, msg)
+	}
 }

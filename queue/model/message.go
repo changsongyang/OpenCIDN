@@ -26,6 +26,13 @@ type Message struct {
 
 type MessageAttr struct {
 	Error string `json:"error,omitempty"`
+
+	Host     string `json:"host,omitempty"`
+	Image    string `json:"image,omitempty"`
+	Progress int64  `json:"progress,omitempty"`
+	Size     int64  `json:"size,omitempty"`
+
+	// Deprecate
 	Blobs []Blob `json:"blobs,omitempty"`
 }
 

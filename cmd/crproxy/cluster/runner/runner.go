@@ -18,6 +18,7 @@ import (
 	"github.com/daocloud/crproxy/transport"
 	"github.com/docker/distribution/manifest/manifestlist"
 	"github.com/spf13/cobra"
+	"github.com/wzshiming/httpseek"
 )
 
 type flagpole struct {
@@ -25,11 +26,13 @@ type flagpole struct {
 
 	AdminToken string
 
-	StorageURL []string
-	Deep       bool
-	Quick      bool
-	Platform   []string
-	Userpass   []string
+	StorageURL    []string
+	Deep          bool
+	Quick         bool
+	Platform      []string
+	Userpass      []string
+	Retry         int
+	RetryInterval time.Duration
 
 	Lease string
 
@@ -61,7 +64,8 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&flags.Quick, "quick", flags.Quick, "Quick sync with tags")
 	cmd.Flags().StringSliceVar(&flags.Platform, "platform", flags.Platform, "Platform")
 	cmd.Flags().StringArrayVarP(&flags.Userpass, "user", "u", flags.Userpass, "host and username and password -u user:pwd@host")
-
+	cmd.Flags().IntVar(&flags.Retry, "retry", flags.Retry, "Retry")
+	cmd.Flags().DurationVar(&flags.RetryInterval, "retry-interval", flags.RetryInterval, "Retry interval")
 	cmd.Flags().DurationVar(&flags.Duration, "duration", flags.Duration, "Duration of the runner")
 	cmd.Flags().StringVar(&flags.Lease, "lease", flags.Lease, "Lease of the runner")
 
@@ -125,7 +129,43 @@ func runE(ctx context.Context, flags *flagpole) error {
 		lease = fmt.Sprintf("%s-%d", flags.Lease, time.Now().Unix())
 	}
 
-	runner, err := runner.NewRunner(http.DefaultClient, lease, flags.QueueURL, flags.AdminToken, sm)
+	if flags.RetryInterval > 0 {
+		tp = httpseek.NewMustReaderTransport(tp, func(request *http.Request, retry int, err error) error {
+			if errors.Is(err, context.Canceled) ||
+				errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			if flags.Retry > 0 && retry >= flags.Retry {
+				return err
+			}
+			if logger != nil {
+				logger.Warn("Retry", "url", request.URL, "retry", retry, "error", err)
+			}
+			time.Sleep(flags.RetryInterval)
+			return nil
+		})
+	}
+
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) > 10 {
+				return http.ErrUseLastResponse
+			}
+			s := make([]string, 0, len(via)+1)
+			for _, v := range via {
+				s = append(s, v.URL.String())
+			}
+
+			lastRedirect := req.URL.String()
+			s = append(s, lastRedirect)
+			logger.Info("redirect", "redirects", s)
+
+			return nil
+		},
+		Transport: tp,
+	}
+
+	runner, err := runner.NewRunner(client, caches, lease, flags.QueueURL, flags.AdminToken, sm)
 	if err != nil {
 		return err
 	}

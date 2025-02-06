@@ -51,7 +51,8 @@ type flagpole struct {
 
 	ReadmeURL string
 
-	BlobsLENoAgent int
+	BlobNoRedirectSize int
+	BlobCacheDuration  time.Duration
 
 	DefaultRegistry         string
 	OverrideDefaultRegistry map[string]string
@@ -66,9 +67,10 @@ type flagpole struct {
 
 func NewCommand() *cobra.Command {
 	flags := &flagpole{
-		Address:     ":18001",
-		Concurrency: 10,
-		SignLink:    true,
+		Address:           ":18001",
+		BlobCacheDuration: time.Hour,
+		Concurrency:       10,
+		SignLink:          true,
 	}
 
 	cmd := &cobra.Command{
@@ -103,7 +105,8 @@ func NewCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.ReadmeURL, "readme-url", flags.ReadmeURL, "Readme url")
 
-	cmd.Flags().IntVar(&flags.BlobsLENoAgent, "blobs-le-no-agent", flags.BlobsLENoAgent, "Less than or equal to No Agent")
+	cmd.Flags().IntVar(&flags.BlobNoRedirectSize, "blob-no-redirect-size", flags.BlobNoRedirectSize, "Less than or equal to no redirect")
+	cmd.Flags().DurationVar(&flags.BlobCacheDuration, "blob-cache-duration", flags.BlobCacheDuration, "Blob cache duration")
 
 	cmd.Flags().StringVar(&flags.DefaultRegistry, "default-registry", flags.DefaultRegistry, "default registry used for non full-path docker pull, like:docker.io")
 	cmd.Flags().StringToStringVar(&flags.OverrideDefaultRegistry, "override-default-registry", flags.OverrideDefaultRegistry, "override default registry")
@@ -147,7 +150,8 @@ func runE(ctx context.Context, flags *flagpole) error {
 	agentOpts = append(agentOpts,
 		agent.WithLogger(logger),
 		agent.WithConcurrency(flags.Concurrency),
-		agent.WithBlobsLENoAgent(flags.BlobsLENoAgent),
+		agent.WithBlobNoRedirectSize(flags.BlobNoRedirectSize),
+		agent.WithBlobCacheDuration(flags.BlobCacheDuration),
 	)
 
 	if flags.StorageURL != "" {

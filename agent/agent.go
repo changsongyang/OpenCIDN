@@ -54,7 +54,7 @@ type Agent struct {
 	blobCache         *blobCache
 	authenticator     *token.Authenticator
 
-	blobsLENoAgent int
+	blobNoRedirectSize int
 
 	queueClient *client.MessageClient
 }
@@ -89,9 +89,9 @@ func WithClient(client *http.Client) Option {
 	}
 }
 
-func WithBlobsLENoAgent(blobsLENoAgent int) Option {
+func WithBlobNoRedirectSize(blobNoRedirectSize int) Option {
 	return func(c *Agent) error {
-		c.blobsLENoAgent = blobsLENoAgent
+		c.blobNoRedirectSize = blobNoRedirectSize
 		return nil
 	}
 }
@@ -473,7 +473,7 @@ func (c *Agent) serveCachedBlobHead(rw http.ResponseWriter, r *http.Request, siz
 }
 
 func (c *Agent) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, size int64) {
-	if c.blobsLENoAgent < 0 || int64(c.blobsLENoAgent) > size {
+	if c.blobNoRedirectSize < 0 || int64(c.blobNoRedirectSize) > size {
 		data, err := c.cache.GetBlob(r.Context(), info.Blobs)
 		if err != nil {
 			c.logger.Info("failed to get blob", "digest", blob, "error", err)

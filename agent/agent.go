@@ -21,6 +21,7 @@ import (
 	"github.com/daocloud/crproxy/token"
 	"github.com/docker/distribution/registry/api/errcode"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
+	"github.com/wzshiming/geario"
 )
 
 var (
@@ -54,7 +55,9 @@ type Agent struct {
 	blobCache         *blobCache
 	authenticator     *token.Authenticator
 
-	blobNoRedirectSize int
+	blobNoRedirectSize             int
+	blobNoRedirectMaxSizePerSecond int
+	blobNoRedirectBPS              *geario.BPS
 
 	queueClient *client.MessageClient
 }
@@ -92,6 +95,18 @@ func WithClient(client *http.Client) Option {
 func WithBlobNoRedirectSize(blobNoRedirectSize int) Option {
 	return func(c *Agent) error {
 		c.blobNoRedirectSize = blobNoRedirectSize
+		return nil
+	}
+}
+
+func WithBlobNoRedirectMaxSizePerSecond(blobNoRedirectMaxSizePerSecond int) Option {
+	return func(c *Agent) error {
+		if blobNoRedirectMaxSizePerSecond > 0 {
+			c.blobNoRedirectBPS = geario.NewBPSAver(time.Second)
+		} else {
+			c.blobNoRedirectBPS = nil
+		}
+		c.blobNoRedirectMaxSizePerSecond = blobNoRedirectMaxSizePerSecond
 		return nil
 	}
 }
@@ -487,8 +502,21 @@ func (c *Agent) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob st
 
 		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 		rw.Header().Set("Content-Type", "application/octet-stream")
-		io.Copy(rw, data)
-		return
+
+		if c.blobNoRedirectBPS == nil {
+			io.Copy(rw, data)
+			return
+		}
+
+		if int(c.blobNoRedirectBPS.Aver()) < c.blobNoRedirectMaxSizePerSecond {
+			r := &readerCounter{
+				r:       data,
+				counter: c.blobNoRedirectBPS,
+			}
+			io.Copy(rw, r)
+			return
+		}
+		// fallback to redirect
 	}
 
 	referer := r.RemoteAddr
@@ -560,4 +588,16 @@ func (c *Agent) waitingQueue(ctx context.Context, msg string, weight int, info *
 	default:
 		return client.MessageResponse{}, fmt.Errorf("unexpected status %q for message %q", mr.Status, msg)
 	}
+}
+
+type readerCounter struct {
+	r       io.Reader
+	counter *geario.BPS
+}
+
+func (r *readerCounter) Read(b []byte) (int, error) {
+	n, err := r.r.Read(b)
+
+	r.counter.Add(geario.B(len(b)))
+	return n, err
 }

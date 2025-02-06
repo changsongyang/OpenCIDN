@@ -44,8 +44,9 @@ type flagpole struct {
 	TokenPublicKeyFile string
 	TokenURL           string
 
-	BlobNoRedirectSize int
-	BlobCacheDuration  time.Duration
+	BlobNoRedirectSize             int
+	BlobNoRedirectMaxSizePerSecond int
+	BlobCacheDuration              time.Duration
 
 	Concurrency int
 
@@ -89,6 +90,7 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.TokenURL, "token-url", flags.TokenURL, "Token url")
 
 	cmd.Flags().IntVar(&flags.BlobNoRedirectSize, "blob-no-redirect-size", flags.BlobNoRedirectSize, "Less than or equal to no redirect")
+	cmd.Flags().IntVar(&flags.BlobNoRedirectMaxSizePerSecond, "blob-no-redirect-max-size-per-second", flags.BlobNoRedirectMaxSizePerSecond, "Maximum size per second for no redirect")
 	cmd.Flags().DurationVar(&flags.BlobCacheDuration, "blob-cache-duration", flags.BlobCacheDuration, "Blob cache duration")
 
 	cmd.Flags().IntVar(&flags.Concurrency, "concurrency", flags.Concurrency, "Concurrency to source")
@@ -136,6 +138,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		agent.WithCache(cache),
 		agent.WithLogger(logger),
 		agent.WithBlobNoRedirectSize(flags.BlobNoRedirectSize),
+		agent.WithBlobNoRedirectMaxSizePerSecond(flags.BlobNoRedirectMaxSizePerSecond),
 		agent.WithBlobCacheDuration(flags.BlobCacheDuration),
 		agent.WithConcurrency(flags.Concurrency),
 	)

@@ -51,8 +51,9 @@ type flagpole struct {
 
 	ReadmeURL string
 
-	BlobNoRedirectSize int
-	BlobCacheDuration  time.Duration
+	BlobNoRedirectSize             int
+	BlobNoRedirectMaxSizePerSecond int
+	BlobCacheDuration              time.Duration
 
 	DefaultRegistry         string
 	OverrideDefaultRegistry map[string]string
@@ -106,6 +107,7 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().StringVar(&flags.ReadmeURL, "readme-url", flags.ReadmeURL, "Readme url")
 
 	cmd.Flags().IntVar(&flags.BlobNoRedirectSize, "blob-no-redirect-size", flags.BlobNoRedirectSize, "Less than or equal to no redirect")
+	cmd.Flags().IntVar(&flags.BlobNoRedirectMaxSizePerSecond, "blob-no-redirect-max-size-per-second", flags.BlobNoRedirectMaxSizePerSecond, "Maximum size per second for no redirect")
 	cmd.Flags().DurationVar(&flags.BlobCacheDuration, "blob-cache-duration", flags.BlobCacheDuration, "Blob cache duration")
 
 	cmd.Flags().StringVar(&flags.DefaultRegistry, "default-registry", flags.DefaultRegistry, "default registry used for non full-path docker pull, like:docker.io")
@@ -151,6 +153,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		agent.WithLogger(logger),
 		agent.WithConcurrency(flags.Concurrency),
 		agent.WithBlobNoRedirectSize(flags.BlobNoRedirectSize),
+		agent.WithBlobNoRedirectMaxSizePerSecond(flags.BlobNoRedirectMaxSizePerSecond),
 		agent.WithBlobCacheDuration(flags.BlobCacheDuration),
 	)
 

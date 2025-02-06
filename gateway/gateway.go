@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -52,8 +51,6 @@ type Gateway struct {
 	acceptsItems []string
 	acceptsStr   string
 	accepts      map[string]struct{}
-
-	blobsLENoAgent int
 
 	agent *agent.Agent
 
@@ -113,12 +110,6 @@ func WithRecacheMaxWait(recacheMaxWait time.Duration) Option {
 	}
 }
 
-func WithBlobsLENoAgent(blobsLENoAgent int) Option {
-	return func(c *Gateway) {
-		c.blobsLENoAgent = blobsLENoAgent
-	}
-}
-
 func WithDefaultRegistry(target string) Option {
 	return func(c *Gateway) {
 		c.defaultRegistry = target
@@ -146,6 +137,12 @@ func WithQueueClient(queueClient *client.MessageClient) Option {
 	}
 }
 
+func WithAgent(a *agent.Agent) Option {
+	return func(c *Gateway) {
+		c.agent = a
+	}
+}
+
 func NewGateway(opts ...Option) (*Gateway, error) {
 	c := &Gateway{
 		logger: slog.Default(),
@@ -168,28 +165,6 @@ func NewGateway(opts ...Option) (*Gateway, error) {
 
 	for _, opt := range opts {
 		opt(c)
-	}
-
-	if c.cache != nil {
-		opts := []agent.Option{
-			agent.WithClient(c.httpClient),
-			agent.WithAuthenticator(c.authenticator),
-			agent.WithLogger(c.logger),
-			agent.WithCache(c.cache),
-			agent.WithBlobsLENoAgent(c.blobsLENoAgent),
-			agent.WithConcurrency(c.concurrency),
-		}
-		if c.queueClient != nil {
-			opts = append(opts, agent.WithQueueClient(c.queueClient))
-		}
-
-		a, err := agent.NewAgent(
-			opts...,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create agent: %w", err)
-		}
-		c.agent = a
 	}
 
 	ctx := context.Background()

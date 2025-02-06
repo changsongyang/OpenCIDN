@@ -102,7 +102,7 @@ func NewCommand() *cobra.Command {
 func runE(ctx context.Context, flags *flagpole) error {
 	mux := http.NewServeMux()
 
-	opts := []agent.Option{}
+	agentOpts := []agent.Option{}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
@@ -132,7 +132,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		return fmt.Errorf("create cache failed: %w", err)
 	}
 
-	opts = append(opts,
+	agentOpts = append(agentOpts,
 		agent.WithCache(cache),
 		agent.WithLogger(logger),
 		agent.WithBlobsLENoAgent(flags.BlobsLENoAgent),
@@ -142,7 +142,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 
 	if flags.QueueURL != "" {
 		queueClient := client.NewMessageClient(http.DefaultClient, flags.QueueURL, flags.QueueToken)
-		opts = append(opts, agent.WithQueueClient(queueClient))
+		agentOpts = append(agentOpts, agent.WithQueueClient(queueClient))
 	}
 
 	if flags.TokenPublicKeyFile != "" {
@@ -156,7 +156,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		}
 
 		authenticator := token.NewAuthenticator(token.NewDecoder(signing.NewVerifier(publicKey)), flags.TokenURL)
-		opts = append(opts, agent.WithAuthenticator(authenticator))
+		agentOpts = append(agentOpts, agent.WithAuthenticator(authenticator))
 	}
 
 	transportOpts := []transport.Option{
@@ -188,7 +188,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 
 	tp = transport.NewLogTransport(tp, logger, time.Minute)
 
-	client := &http.Client{
+	httpClient := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) > 10 {
 				return http.ErrUseLastResponse
@@ -206,9 +206,9 @@ func runE(ctx context.Context, flags *flagpole) error {
 		},
 		Transport: tp,
 	}
-	opts = append(opts, agent.WithClient(client))
+	agentOpts = append(agentOpts, agent.WithClient(httpClient))
 
-	a, err := agent.NewAgent(opts...)
+	a, err := agent.NewAgent(agentOpts...)
 	if err != nil {
 		return fmt.Errorf("create agent failed: %w", err)
 	}

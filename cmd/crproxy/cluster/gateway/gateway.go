@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/daocloud/crproxy/agent"
 	"github.com/daocloud/crproxy/cache"
 	"github.com/daocloud/crproxy/gateway"
 	"github.com/daocloud/crproxy/internal/pki"
@@ -119,13 +120,13 @@ func NewCommand() *cobra.Command {
 func runE(ctx context.Context, flags *flagpole) error {
 	mux := http.NewServeMux()
 
-	opts := []gateway.Option{}
+	gatewayOpts := []gateway.Option{}
+	agentOpts := []agent.Option{}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
-	opts = append(opts,
+	gatewayOpts = append(gatewayOpts,
 		gateway.WithLogger(logger),
-		gateway.WithBlobsLENoAgent(flags.BlobsLENoAgent),
 		gateway.WithDefaultRegistry(flags.DefaultRegistry),
 		gateway.WithOverrideDefaultRegistry(flags.OverrideDefaultRegistry),
 		gateway.WithConcurrency(flags.Concurrency),
@@ -141,6 +142,12 @@ func runE(ctx context.Context, flags *flagpole) error {
 			return info
 		}),
 		gateway.WithDisableTagsList(flags.DisableTagsList),
+	)
+
+	agentOpts = append(agentOpts,
+		agent.WithLogger(logger),
+		agent.WithConcurrency(flags.Concurrency),
+		agent.WithBlobsLENoAgent(flags.BlobsLENoAgent),
 	)
 
 	if flags.StorageURL != "" {
@@ -166,9 +173,15 @@ func runE(ctx context.Context, flags *flagpole) error {
 		if err != nil {
 			return fmt.Errorf("create cache failed: %w", err)
 		}
-		opts = append(opts, gateway.WithCache(cache))
-		opts = append(opts, gateway.WithManifestCacheDuration(flags.ManifestCacheDuration))
-		opts = append(opts, gateway.WithRecacheMaxWait(flags.RecacheMaxWaitDuration))
+		gatewayOpts = append(gatewayOpts,
+			gateway.WithCache(cache),
+			gateway.WithManifestCacheDuration(flags.ManifestCacheDuration),
+			gateway.WithRecacheMaxWait(flags.RecacheMaxWaitDuration),
+		)
+
+		agentOpts = append(agentOpts,
+			agent.WithCache(cache),
+		)
 	}
 
 	if flags.TokenPublicKeyFile != "" {
@@ -185,7 +198,8 @@ func runE(ctx context.Context, flags *flagpole) error {
 		}
 
 		authenticator := token.NewAuthenticator(token.NewDecoder(signing.NewVerifier(publicKey)), flags.TokenURL)
-		opts = append(opts, gateway.WithAuthenticator(authenticator))
+		gatewayOpts = append(gatewayOpts, gateway.WithAuthenticator(authenticator))
+		agentOpts = append(agentOpts, agent.WithAuthenticator(authenticator))
 	}
 
 	transportOpts := []transport.Option{
@@ -217,12 +231,13 @@ func runE(ctx context.Context, flags *flagpole) error {
 
 	if flags.QueueURL != "" {
 		queueClient := client.NewMessageClient(http.DefaultClient, flags.QueueURL, flags.QueueToken)
-		opts = append(opts, gateway.WithQueueClient(queueClient))
+		gatewayOpts = append(gatewayOpts, gateway.WithQueueClient(queueClient))
+		agentOpts = append(agentOpts, agent.WithQueueClient(queueClient))
 	}
 
 	tp = transport.NewLogTransport(tp, logger, time.Second)
 
-	client := &http.Client{
+	httpClient := &http.Client{
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) > 10 {
 				return http.ErrUseLastResponse
@@ -240,9 +255,19 @@ func runE(ctx context.Context, flags *flagpole) error {
 		},
 		Transport: tp,
 	}
-	opts = append(opts, gateway.WithClient(client))
+	gatewayOpts = append(gatewayOpts, gateway.WithClient(httpClient))
+	agentOpts = append(agentOpts, agent.WithClient(httpClient))
 
-	a, err := gateway.NewGateway(opts...)
+	a, err := agent.NewAgent(
+		agentOpts...,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	gatewayOpts = append(gatewayOpts, gateway.WithAgent(a))
+
+	gw, err := gateway.NewGateway(gatewayOpts...)
 	if err != nil {
 		return fmt.Errorf("create gateway failed: %w", err)
 	}
@@ -252,7 +277,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 			http.Redirect(rw, r, flags.ReadmeURL, http.StatusFound)
 		})
 	}
-	mux.Handle("/v2/", a)
+	mux.Handle("/v2/", gw)
 
 	var handler http.Handler = mux
 	handler = handlers.LoggingHandler(os.Stderr, handler)

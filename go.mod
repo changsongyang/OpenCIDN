@@ -1,8 +1,6 @@
 module github.com/daocloud/crproxy
 
-go 1.23
-
-toolchain go1.23.4
+go 1.23.4
 
 require (
 	github.com/denverdino/aliyungo v0.0.0
@@ -13,7 +11,6 @@ require (
 	github.com/go-openapi/spec v0.20.9
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/google/go-containerregistry v0.20.2
-	github.com/google/uuid v1.6.0
 	github.com/gorilla/handlers v1.5.2
 	github.com/huaweicloud/huaweicloud-sdk-go-obs v3.24.6+incompatible
 	github.com/opencontainers/go-digest v1.0.0

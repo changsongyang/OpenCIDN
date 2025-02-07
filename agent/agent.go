@@ -550,7 +550,7 @@ func (c *Agent) waitingQueue(ctx context.Context, msg string, weight int, info *
 		return client.MessageResponse{}, fmt.Errorf("failed to create queue: %w", err)
 	}
 
-	if mr.Status == model.StatusPending {
+	if mr.Status == model.StatusPending || mr.Status == model.StatusProcessing {
 		c.logger.Info("watching message from queue", "msg", msg)
 
 		chMr, err := c.queueClient.Watch(ctx, mr.MessageID)
@@ -586,7 +586,7 @@ func (c *Agent) waitingQueue(ctx context.Context, msg string, weight int, info *
 	case model.StatusFailed:
 		return client.MessageResponse{}, fmt.Errorf("%q Queue Error: %s", msg, mr.Data.Error)
 	default:
-		return client.MessageResponse{}, fmt.Errorf("unexpected status %q for message %q", mr.Status, msg)
+		return client.MessageResponse{}, fmt.Errorf("unexpected status %d for message %q", mr.Status, msg)
 	}
 }
 

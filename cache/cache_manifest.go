@@ -39,7 +39,8 @@ func (c *Cache) RelinkManifest(ctx context.Context, host, image, tag string, blo
 
 func (c *Cache) PutManifestContent(ctx context.Context, host, image, tagOrBlob string, content []byte) (int64, string, string, error) {
 	mt := struct {
-		MediaType string `json:"mediaType"`
+		MediaType string          `json:"mediaType"`
+		Manifests json.RawMessage `json:"manifests"`
 	}{}
 	err := json.Unmarshal(content, &mt)
 	if err != nil {
@@ -48,7 +49,11 @@ func (c *Cache) PutManifestContent(ctx context.Context, host, image, tagOrBlob s
 
 	mediaType := mt.MediaType
 	if mediaType == "" {
-		mediaType = "application/vnd.docker.distribution.manifest.v1+json"
+		if len(mt.Manifests) != 0 {
+			mediaType = "application/vnd.oci.image.index.v1+json"
+		} else {
+			mediaType = "application/vnd.docker.distribution.manifest.v1+json"
+		}
 	}
 
 	h := sha256.New()
@@ -101,7 +106,8 @@ func (c *Cache) GetManifestContent(ctx context.Context, host, image, tagOrBlob s
 	}
 
 	mt := struct {
-		MediaType string `json:"mediaType"`
+		MediaType string          `json:"mediaType"`
+		Manifests json.RawMessage `json:"manifests"`
 	}{}
 	err = json.Unmarshal(content, &mt)
 	if err != nil {
@@ -118,7 +124,11 @@ func (c *Cache) GetManifestContent(ctx context.Context, host, image, tagOrBlob s
 
 	mediaType := mt.MediaType
 	if mediaType == "" {
-		mediaType = "application/vnd.docker.distribution.manifest.v1+json"
+		if len(mt.Manifests) != 0 {
+			mediaType = "application/vnd.oci.image.index.v1+json"
+		} else {
+			mediaType = "application/vnd.docker.distribution.manifest.v1+json"
+		}
 	}
 
 	return content, digest, mediaType, nil

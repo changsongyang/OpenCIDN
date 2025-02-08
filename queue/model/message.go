@@ -12,6 +12,7 @@ const (
 	StatusProcessing MessageStatus = 10
 	StatusCompleted  MessageStatus = 20
 	StatusFailed     MessageStatus = 30
+	StatusCleanup    MessageStatus = 90
 )
 
 type Message struct {

@@ -337,12 +337,11 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 			return
 		}
 
-		c.rateLimit(rw, r, info.Blobs, info, t, value.Size, start)
+		c.rateLimit(rw, r, info.Blobs, info, t, stat.Size(), start)
 		c.serveCachedBlob(rw, r, info.Blobs, info, t, stat.Size())
 		return
 	}
 
-	c.rateLimit(rw, r, info.Blobs, info, t, value.Size, start)
 	select {
 	case <-ctx.Done():
 		return
@@ -358,6 +357,8 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 		if c.serveCachedBlobHead(rw, r, value.Size) {
 			return
 		}
+
+		c.rateLimit(rw, r, info.Blobs, info, t, value.Size, start)
 		c.serveCachedBlob(rw, r, info.Blobs, info, t, value.Size)
 		return
 	}
@@ -367,6 +368,8 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 		if c.serveCachedBlobHead(rw, r, stat.Size()) {
 			return
 		}
+
+		c.rateLimit(rw, r, info.Blobs, info, t, stat.Size(), start)
 		c.serveCachedBlob(rw, r, info.Blobs, info, t, stat.Size())
 		return
 	}

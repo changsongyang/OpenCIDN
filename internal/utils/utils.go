@@ -74,14 +74,16 @@ func CorrectImage(host, name string) (string, string) {
 	if host == "docker.io" {
 		host = "registry-1.docker.io"
 	} else if host == "ollama.ai" {
-		host = "registry.ollama.ai"
+		host = "ollama.com"
+	} else if host == "registry.ollama.ai" {
+		host = "ollama.com"
 	}
 
 	// docker.io/busybox => docker.io/library/busybox
 	if host == "registry-1.docker.io" && !strings.Contains(name, "/") {
 		name = "library/" + name
 	}
-	if host == "registry.ollama.ai" && !strings.Contains(name, "/") {
+	if host == "ollama.com" && !strings.Contains(name, "/") {
 		name = "library/" + name
 	}
 	return host, name

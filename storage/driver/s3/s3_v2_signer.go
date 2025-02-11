@@ -26,8 +26,10 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -36,7 +38,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/service/s3"
-	log "github.com/sirupsen/logrus"
 )
 
 type signer struct {
@@ -78,7 +79,8 @@ func setv2Handlers(svc *s3.S3) {
 	svc.Handlers.Build.PushBack(func(r *request.Request) {
 		parsedURL, err := url.Parse(r.HTTPRequest.URL.String())
 		if err != nil {
-			log.Fatalf("Failed to parse URL: %v", err)
+			slog.Error("Failed to parse URL", "error", err)
+			os.Exit(1)
 		}
 		r.HTTPRequest.URL.Opaque = parsedURL.Path
 	})
@@ -208,9 +210,5 @@ func (v2 *signer) Sign() error {
 		headers["Authorization"] = []string{"AWS " + accessKey + ":" + v2.signature}
 	}
 
-	log.WithFields(log.Fields{
-		"string-to-sign": v2.stringToSign,
-		"signature":      v2.signature,
-	}).Debugln("request signature")
 	return nil
 }

@@ -158,6 +158,9 @@ func runE(ctx context.Context, flags *flagpole) error {
 			cache.WithSignLink(flags.SignLink),
 			cache.WithStorageDriver(sd),
 		)
+		if flags.LinkExpires > 0 {
+			bigCacheOpts = append(bigCacheOpts, cache.WithLinkExpires(flags.LinkExpires))
+		}
 		bigsdcache, err := cache.NewCache(bigCacheOpts...)
 		if err != nil {
 			return fmt.Errorf("create cache failed: %w", err)

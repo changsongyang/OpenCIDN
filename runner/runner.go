@@ -23,8 +23,9 @@ import (
 )
 
 type Runner struct {
-	bigCacheSize int
-	bigCache     *cache.Cache
+	bigCacheSize  int
+	bigCache      *cache.Cache
+	manifestCache *cache.Cache
 
 	caches      []*cache.Cache
 	httpClient  *http.Client
@@ -86,6 +87,12 @@ func WithBigCache(cache *cache.Cache, size int) Option {
 	return func(c *Runner) {
 		c.bigCache = cache
 		c.bigCacheSize = size
+	}
+}
+
+func WithManifestCache(cache *cache.Cache) Option {
+	return func(c *Runner) {
+		c.manifestCache = cache
 	}
 }
 
@@ -609,7 +616,6 @@ func (r *Runner) heartbeat(ctx context.Context, messageID int64, gotSize, progre
 var acceptsStr = "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json"
 
 func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tagOrBlob string, priority int, gotSize, progress *atomic.Int64) error {
-	var subCaches []*cache.Cache
 
 	u := &url.URL{
 		Scheme: "https",
@@ -617,8 +623,18 @@ func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tag
 		Path:   fmt.Sprintf("/v2/%s/manifests/%s", image, tagOrBlob),
 	}
 
+	var caches []*cache.Cache
+
+	if r.manifestCache != nil {
+		caches = append([]*cache.Cache{r.manifestCache}, r.caches...)
+	} else {
+		caches = append(caches, r.caches...)
+	}
+
+	var subCaches []*cache.Cache
+
 	if strings.HasPrefix(tagOrBlob, "sha256:") {
-		for _, cache := range r.caches {
+		for _, cache := range caches {
 			exist, _ := cache.StatManifest(ctx, host, image, tagOrBlob)
 			if !exist {
 				subCaches = append(subCaches, cache)
@@ -645,14 +661,14 @@ func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tag
 
 		digest := resp.Header.Get("Docker-Content-Digest")
 		if digest != "" {
-			for _, cache := range r.caches {
+			for _, cache := range caches {
 				exist, _ := cache.StatOrRelinkManifest(ctx, host, image, tagOrBlob, digest)
 				if !exist {
 					subCaches = append(subCaches, cache)
 				}
 			}
 		} else {
-			for _, cache := range r.caches {
+			for _, cache := range caches {
 				exist, _ := cache.StatManifest(ctx, host, image, tagOrBlob)
 				if !exist {
 					subCaches = append(subCaches, cache)
@@ -660,7 +676,7 @@ func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tag
 			}
 		}
 	} else {
-		for _, cache := range r.caches {
+		for _, cache := range caches {
 			exist, _ := cache.StatManifest(ctx, host, image, tagOrBlob)
 			if !exist {
 				subCaches = append(subCaches, cache)

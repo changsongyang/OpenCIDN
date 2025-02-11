@@ -26,6 +26,8 @@ type flagpole struct {
 	QueueURL   string
 	QueueToken string
 
+	ManifestStorageURL string
+
 	BigStorageURL  string
 	BigStorageSize int
 
@@ -63,6 +65,7 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&flags.StorageURL, "storage-url", flags.StorageURL, "Storage driver url")
 	cmd.Flags().StringVar(&flags.BigStorageURL, "big-storage-url", flags.BigStorageURL, "Big storage driver url")
 	cmd.Flags().IntVar(&flags.BigStorageSize, "big-storage-size", flags.BigStorageSize, "Big storage size")
+	cmd.Flags().StringVar(&flags.ManifestStorageURL, "manifest-storage-url", flags.ManifestStorageURL, "manifest storage driver url")
 	cmd.Flags().BoolVar(&flags.Quick, "quick", flags.Quick, "Quick sync with tags")
 	cmd.Flags().StringSliceVar(&flags.Platform, "platform", flags.Platform, "Platform")
 	cmd.Flags().StringArrayVarP(&flags.Userpass, "user", "u", flags.Userpass, "host and username and password -u user:pwd@host")
@@ -176,6 +179,22 @@ func runE(ctx context.Context, flags *flagpole) error {
 			return fmt.Errorf("create cache failed: %w", err)
 		}
 		opts = append(opts, runner.WithBigCache(bigsdcache, flags.BigStorageSize))
+	}
+
+	if flags.ManifestStorageURL != "" {
+		manifestCacheOpts := []cache.Option{}
+		sd, err := storage.NewStorage(flags.ManifestStorageURL)
+		if err != nil {
+			return fmt.Errorf("create storage driver failed: %w", err)
+		}
+		manifestCacheOpts = append(manifestCacheOpts,
+			cache.WithStorageDriver(sd),
+		)
+		manifestsdcache, err := cache.NewCache(manifestCacheOpts...)
+		if err != nil {
+			return fmt.Errorf("create cache failed: %w", err)
+		}
+		opts = append(opts, runner.WithManifestCache(manifestsdcache))
 	}
 
 	runner, err := runner.NewRunner(opts...)

@@ -254,7 +254,13 @@ func (mc *MessageController) Schedule(ctx context.Context, logger *slog.Logger) 
 					if err != nil {
 						logger.Error("ResetToPending", "error", err)
 					} else {
-						data := MessageResponse{MessageID: item.MessageID, Content: item.Content, Priority: item.Priority, Status: model.StatusPending}
+						data := MessageResponse{
+							MessageID: item.MessageID,
+							Content:   item.Content,
+							Priority:  item.Priority,
+							Status:    model.StatusPending,
+							Data:      item.Data,
+						}
 						mc.appendWatchChannel(item.MessageID, data)
 						mc.appendWatchListChannels(data)
 					}
@@ -273,7 +279,9 @@ func (mc *MessageController) Schedule(ctx context.Context, logger *slog.Logger) 
 					mc.appendWatchListChannels(MessageResponse{
 						MessageID: item.MessageID,
 						Content:   item.Content,
-						Status:    model.StatusCleanup,
+						Priority:  item.Priority,
+						Status:    model.StatusPending,
+						Data:      item.Data,
 					})
 				}
 			}

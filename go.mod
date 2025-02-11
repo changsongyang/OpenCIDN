@@ -3,6 +3,7 @@ module github.com/daocloud/crproxy
 go 1.23.4
 
 require (
+	github.com/aws/aws-sdk-go v1.48.10
 	github.com/denverdino/aliyungo v0.0.0
 	github.com/distribution/reference v0.6.0
 	github.com/docker/distribution v2.8.2+incompatible
@@ -16,11 +17,11 @@ require (
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/spf13/cobra v1.8.1
 	github.com/wzshiming/cmux v0.4.2
-	github.com/wzshiming/geario v0.0.0-20240308093553-a996e3817533
 	github.com/wzshiming/hostmatcher v0.0.3
 	github.com/wzshiming/httpseek v0.1.0
 	github.com/wzshiming/imc v0.0.0-20250106051804-1cb884b5184a
 	golang.org/x/crypto v0.28.0
+	golang.org/x/time v0.10.0
 )
 
 replace (
@@ -30,7 +31,6 @@ replace (
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
-	github.com/aws/aws-sdk-go v1.48.10 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect

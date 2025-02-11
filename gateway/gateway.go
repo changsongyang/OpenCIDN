@@ -13,11 +13,12 @@ import (
 	"github.com/daocloud/crproxy/agent"
 	"github.com/daocloud/crproxy/cache"
 	"github.com/daocloud/crproxy/internal/queue"
+	"github.com/daocloud/crproxy/internal/throttled"
 	"github.com/daocloud/crproxy/internal/utils"
 	"github.com/daocloud/crproxy/queue/client"
 	"github.com/daocloud/crproxy/token"
 	"github.com/docker/distribution/registry/api/errcode"
-	"github.com/wzshiming/geario"
+	"golang.org/x/time/rate"
 )
 
 var (
@@ -351,7 +352,8 @@ func (c *Gateway) forward(rw http.ResponseWriter, r *http.Request, info *PathInf
 		var body io.Reader = resp.Body
 
 		if t.RateLimitPerSecond > 0 {
-			body = geario.NewGear(time.Second, geario.B(t.RateLimitPerSecond)).Reader(body)
+			limit := rate.NewLimiter(rate.Limit(t.RateLimitPerSecond), 1024*1024)
+			body = throttled.NewThrottledReader(r.Context(), body, limit)
 		}
 
 		io.Copy(rw, body)

@@ -15,13 +15,14 @@ import (
 
 	"github.com/daocloud/crproxy/cache"
 	"github.com/daocloud/crproxy/internal/queue"
+	"github.com/daocloud/crproxy/internal/throttled"
 	"github.com/daocloud/crproxy/internal/utils"
 	"github.com/daocloud/crproxy/queue/client"
 	"github.com/daocloud/crproxy/queue/model"
 	"github.com/daocloud/crproxy/token"
 	"github.com/docker/distribution/registry/api/errcode"
 	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
-	"github.com/wzshiming/geario"
+	"golang.org/x/time/rate"
 )
 
 var (
@@ -60,7 +61,7 @@ type Agent struct {
 
 	blobNoRedirectSize             int
 	blobNoRedirectMaxSizePerSecond int
-	blobNoRedirectBPS              *geario.BPS
+	blobNoRedirectLimit            *rate.Limiter
 
 	queueClient *client.MessageClient
 }
@@ -113,9 +114,9 @@ func WithBlobNoRedirectSize(blobNoRedirectSize int) Option {
 func WithBlobNoRedirectMaxSizePerSecond(blobNoRedirectMaxSizePerSecond int) Option {
 	return func(c *Agent) error {
 		if blobNoRedirectMaxSizePerSecond > 0 {
-			c.blobNoRedirectBPS = geario.NewBPSAver(time.Second)
+			c.blobNoRedirectLimit = rate.NewLimiter(rate.Limit(blobNoRedirectMaxSizePerSecond), 1024*1024*1024)
 		} else {
-			c.blobNoRedirectBPS = nil
+			c.blobNoRedirectLimit = nil
 		}
 		c.blobNoRedirectMaxSizePerSecond = blobNoRedirectMaxSizePerSecond
 		return nil
@@ -337,13 +338,12 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 			return
 		}
 
-		c.rateLimit(rw, r, info.Blobs, info, t, value.Size, start)
 		if value.BigCache {
-			c.serveBigCachedBlob(rw, r, info.Blobs, info, t, value.Size)
+			c.serveBigCachedBlob(rw, r, info.Blobs, info, t, value.Size, start)
 			return
 		}
 
-		c.serveCachedBlob(rw, r, info.Blobs, info, t, value.Size)
+		c.serveCachedBlob(rw, r, info.Blobs, info, t, value.Size, start)
 		return
 	}
 
@@ -356,8 +356,7 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 					return
 				}
 
-				c.rateLimit(rw, r, info.Blobs, info, t, stat.Size(), start)
-				c.serveBigCachedBlob(rw, r, info.Blobs, info, t, stat.Size())
+				c.serveBigCachedBlob(rw, r, info.Blobs, info, t, stat.Size(), start)
 				return
 			}
 		} else {
@@ -365,8 +364,7 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 				return
 			}
 
-			c.rateLimit(rw, r, info.Blobs, info, t, stat.Size(), start)
-			c.serveCachedBlob(rw, r, info.Blobs, info, t, stat.Size())
+			c.serveCachedBlob(rw, r, info.Blobs, info, t, stat.Size(), start)
 			return
 		}
 	} else {
@@ -377,8 +375,7 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 					return
 				}
 
-				c.rateLimit(rw, r, info.Blobs, info, t, stat.Size(), start)
-				c.serveBigCachedBlob(rw, r, info.Blobs, info, t, stat.Size())
+				c.serveBigCachedBlob(rw, r, info.Blobs, info, t, stat.Size(), start)
 				return
 			}
 		}
@@ -401,13 +398,11 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 			return
 		}
 
-		c.rateLimit(rw, r, info.Blobs, info, t, value.Size, start)
-
 		if value.BigCache {
-			c.serveBigCachedBlob(rw, r, info.Blobs, info, t, value.Size)
+			c.serveBigCachedBlob(rw, r, info.Blobs, info, t, value.Size, start)
 			return
 		}
-		c.serveCachedBlob(rw, r, info.Blobs, info, t, value.Size)
+		c.serveCachedBlob(rw, r, info.Blobs, info, t, value.Size, start)
 		return
 	}
 
@@ -418,8 +413,7 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 				return
 			}
 
-			c.rateLimit(rw, r, info.Blobs, info, t, stat.Size(), start)
-			c.serveBigCachedBlob(rw, r, info.Blobs, info, t, stat.Size())
+			c.serveBigCachedBlob(rw, r, info.Blobs, info, t, stat.Size(), start)
 			return
 		}
 	}
@@ -430,8 +424,7 @@ func (c *Agent) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 			return
 		}
 
-		c.rateLimit(rw, r, info.Blobs, info, t, stat.Size(), start)
-		c.serveCachedBlob(rw, r, info.Blobs, info, t, stat.Size())
+		c.serveCachedBlob(rw, r, info.Blobs, info, t, stat.Size(), start)
 		return
 	}
 
@@ -561,7 +554,9 @@ func (c *Agent) serveCachedBlobHead(rw http.ResponseWriter, r *http.Request, siz
 	return false
 }
 
-func (c *Agent) serveBigCachedBlob(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, size int64) {
+func (c *Agent) serveBigCachedBlob(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, size int64, start time.Time) {
+	c.rateLimit(rw, r, info.Blobs, info, t, size, start)
+
 	referer := r.RemoteAddr
 	if info != nil {
 		referer = fmt.Sprintf("%d-%d:%s:%s/%s", t.RegistryID, t.TokenID, referer, info.Host, info.Image)
@@ -582,38 +577,39 @@ func (c *Agent) serveBigCachedBlob(rw http.ResponseWriter, r *http.Request, blob
 	return
 }
 
-func (c *Agent) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, size int64) {
-
+func (c *Agent) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, size int64, start time.Time) {
 	if c.blobNoRedirectSize < 0 || int64(c.blobNoRedirectSize) > size {
-		data, err := c.cache.GetBlob(r.Context(), info.Blobs)
-		if err != nil {
-			c.logger.Info("failed to get blob", "digest", blob, "error", err)
-			c.blobCache.Remove(info.Blobs)
-			utils.ServeError(rw, r, errcode.ErrorCodeUnknown, 0)
-			return
-		}
-		defer data.Close()
-
-		c.blobCache.Put(info.Blobs, size, false)
-
-		rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
-		rw.Header().Set("Content-Type", "application/octet-stream")
-
-		if c.blobNoRedirectBPS == nil {
-			io.Copy(rw, data)
-			return
-		}
-
-		if int(c.blobNoRedirectBPS.Aver()) < c.blobNoRedirectMaxSizePerSecond {
-			r := &readerCounter{
-				r:       data,
-				counter: c.blobNoRedirectBPS,
+		if c.blobNoRedirectLimit == nil || c.blobNoRedirectLimit.Reserve().Delay() == 0 {
+			data, err := c.cache.GetBlob(r.Context(), info.Blobs)
+			if err != nil {
+				c.logger.Info("failed to get blob", "digest", blob, "error", err)
+				c.blobCache.Remove(info.Blobs)
+				utils.ServeError(rw, r, errcode.ErrorCodeUnknown, 0)
+				return
 			}
-			io.Copy(rw, r)
+			defer data.Close()
+
+			c.blobCache.Put(info.Blobs, size, false)
+
+			rw.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+			rw.Header().Set("Content-Type", "application/octet-stream")
+
+			var body io.Reader = data
+			if t.RateLimitPerSecond > 0 {
+				limit := rate.NewLimiter(rate.Limit(t.RateLimitPerSecond), 1024*1024)
+				body = throttled.NewThrottledReader(r.Context(), body, limit)
+			}
+
+			if c.blobNoRedirectLimit != nil {
+				body = throttled.NewThrottledReader(r.Context(), body, c.blobNoRedirectLimit)
+			}
+
+			io.Copy(rw, body)
 			return
 		}
-		// fallback to redirect
 	}
+
+	c.rateLimit(rw, r, info.Blobs, info, t, size, start)
 
 	referer := r.RemoteAddr
 	if info != nil {
@@ -684,16 +680,4 @@ func (c *Agent) waitingQueue(ctx context.Context, msg string, weight int, info *
 	default:
 		return client.MessageResponse{}, fmt.Errorf("unexpected status %d for message %q", mr.Status, msg)
 	}
-}
-
-type readerCounter struct {
-	r       io.Reader
-	counter *geario.BPS
-}
-
-func (r *readerCounter) Read(b []byte) (int, error) {
-	n, err := r.r.Read(b)
-
-	r.counter.Add(geario.B(len(b)))
-	return n, err
 }

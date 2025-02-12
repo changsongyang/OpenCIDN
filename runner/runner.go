@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"sort"
@@ -693,16 +694,27 @@ func (r *Runner) manifestSync(ctx context.Context, resp client.MessageResponse) 
 }
 
 func (r *Runner) heartbeat(ctx context.Context, messageID int64, gotSize, progress *atomic.Int64, errCh chan error) error {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(time.Millisecond * time.Duration(100+rand.Int32N(900)))
+	defer ticker.Stop()
+
+	var prevProgress int64 = -1
 
 	for {
 		select {
 		case <-ticker.C:
+			p := progress.Load()
+			if prevProgress == p {
+				prevProgress = -1
+				continue
+			}
+
+			prevProgress = p
+
 			err := r.queueClient.Heartbeat(ctx, messageID, client.HeartbeatRequest{
 				Lease: r.lease,
 				Data: model.MessageAttr{
 					Size:     gotSize.Load(),
-					Progress: progress.Load(),
+					Progress: p,
 				},
 			})
 
@@ -710,6 +722,7 @@ func (r *Runner) heartbeat(ctx context.Context, messageID int64, gotSize, progre
 				r.logger.Error("Heartbeat", "error", err)
 			}
 
+			ticker.Reset(10*time.Second + time.Millisecond*time.Duration(rand.UintN(1000)))
 		case err := <-errCh:
 			if err == nil {
 				_ = r.queueClient.Heartbeat(ctx, messageID, client.HeartbeatRequest{

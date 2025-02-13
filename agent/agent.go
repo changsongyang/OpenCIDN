@@ -597,7 +597,7 @@ func (c *Agent) serveBigCachedBlob(rw http.ResponseWriter, r *http.Request, blob
 }
 
 func (c *Agent) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, modTime time.Time, size int64, start time.Time) {
-	if c.blobNoRedirectSize < 0 || int64(c.blobNoRedirectSize) > size {
+	if !t.AlwaysRedirect && (c.blobNoRedirectSize < 0 || int64(c.blobNoRedirectSize) > size) {
 		if c.blobNoRedirectLimit == nil || c.blobNoRedirectLimit.Reserve().Delay() == 0 {
 			rw.Header().Set("Content-Type", "application/octet-stream")
 

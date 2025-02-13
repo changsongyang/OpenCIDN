@@ -239,6 +239,8 @@ func (m *Manager) GetTokenWithUser(ctx context.Context, userinfo *url.Userinfo, 
 		BlobsAgentURL: tok.Data.BlobsAgentURL,
 		NoBlobsAgent:  tok.Data.NoBlobsAgent,
 
+		AlwaysRedirect: tok.Data.AlwaysRedirect,
+
 		Block:        tok.Data.Block,
 		BlockMessage: tok.Data.BlockMessage,
 	}

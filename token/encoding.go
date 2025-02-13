@@ -60,6 +60,8 @@ type Attribute struct {
 	NoBlobsAgent  bool   `json:"no_blobs_agent,omitempty"`
 	BlobsAgentURL string `json:"blobs_url,omitempty"`
 
+	AlwaysRedirect bool `json:"always_redirect,omitempty"`
+
 	Block        bool   `json:"block,omitempty"`
 	BlockMessage string `json:"block_message,omitempty"`
 }

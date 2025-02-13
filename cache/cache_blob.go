@@ -33,6 +33,11 @@ func (c *Cache) GetBlob(ctx context.Context, blob string) (io.ReadCloser, error)
 	return c.Get(ctx, cachePath)
 }
 
+func (c *Cache) GetBlobWithOffset(ctx context.Context, blob string, offset int64) (io.ReadCloser, error) {
+	cachePath := blobCachePath(blob)
+	return c.GetWithOffset(ctx, cachePath, offset)
+}
+
 func (c *Cache) DeleteBlob(ctx context.Context, blob string) error {
 	cachePath := blobCachePath(blob)
 	return c.Delete(ctx, cachePath)

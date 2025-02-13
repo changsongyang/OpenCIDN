@@ -186,6 +186,10 @@ func (c *Cache) Get(ctx context.Context, cachePath string) (io.ReadCloser, error
 	return c.storageDriver.Reader(ctx, cachePath, 0)
 }
 
+func (c *Cache) GetWithOffset(ctx context.Context, cachePath string, offset int64) (io.ReadCloser, error) {
+	return c.storageDriver.Reader(ctx, cachePath, offset)
+}
+
 func (c *Cache) GetContent(ctx context.Context, cachePath string) ([]byte, error) {
 	return c.storageDriver.GetContent(ctx, cachePath)
 }

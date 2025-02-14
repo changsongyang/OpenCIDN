@@ -63,6 +63,7 @@ type Agent struct {
 	blobNoRedirectSize             int
 	blobNoRedirectMaxSizePerSecond int
 	blobNoRedirectLimit            *rate.Limiter
+	forceBlobNoRedirect            bool
 
 	queueClient *client.MessageClient
 }
@@ -105,6 +106,13 @@ func WithClient(client *http.Client) Option {
 	}
 }
 
+func WithForceBlobNoRedirect(forceBlobNoRedirect bool) Option {
+	return func(c *Agent) error {
+		c.forceBlobNoRedirect = forceBlobNoRedirect
+		return nil
+	}
+}
+
 func WithBlobNoRedirectSize(blobNoRedirectSize int) Option {
 	return func(c *Agent) error {
 		c.blobNoRedirectSize = blobNoRedirectSize
@@ -115,7 +123,7 @@ func WithBlobNoRedirectSize(blobNoRedirectSize int) Option {
 func WithBlobNoRedirectMaxSizePerSecond(blobNoRedirectMaxSizePerSecond int) Option {
 	return func(c *Agent) error {
 		if blobNoRedirectMaxSizePerSecond > 0 {
-			c.blobNoRedirectLimit = rate.NewLimiter(rate.Limit(blobNoRedirectMaxSizePerSecond), 1024*1024*1024)
+			c.blobNoRedirectLimit = rate.NewLimiter(rate.Limit(blobNoRedirectMaxSizePerSecond), 1024)
 		} else {
 			c.blobNoRedirectLimit = nil
 		}
@@ -597,44 +605,67 @@ func (c *Agent) serveBigCachedBlob(rw http.ResponseWriter, r *http.Request, blob
 }
 
 func (c *Agent) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, modTime time.Time, size int64, start time.Time) {
-	if !t.AlwaysRedirect && (c.blobNoRedirectSize < 0 || int64(c.blobNoRedirectSize) > size) {
-		if c.blobNoRedirectLimit == nil || c.blobNoRedirectLimit.Reserve().Delay() == 0 {
-			rw.Header().Set("Content-Type", "application/octet-stream")
+	if t.AlwaysRedirect {
+		c.serveCachedBlobRedirect(rw, r, blob, info, t, modTime, size, start)
+		return
+	}
 
-			rs := seeker.NewReadSeekCloser(func(start int64) (io.ReadCloser, error) {
-				data, err := c.cache.GetBlobWithOffset(r.Context(), info.Blobs, start)
-				if err != nil {
-					return nil, err
-				}
+	if c.blobNoRedirectSize > 0 && size > int64(c.blobNoRedirectSize) {
+		c.serveCachedBlobRedirect(rw, r, blob, info, t, modTime, size, start)
+		return
+	}
 
-				var body io.Reader = data
-				if t.RateLimitPerSecond > 0 {
-					limit := rate.NewLimiter(rate.Limit(t.RateLimitPerSecond), 1024*1024)
-					body = throttled.NewThrottledReader(r.Context(), body, limit)
-				}
+	ctx := r.Context()
 
-				if c.blobNoRedirectLimit != nil {
-					body = throttled.NewThrottledReader(r.Context(), body, c.blobNoRedirectLimit)
-				}
+	if c.blobNoRedirectLimit != nil {
+		if c.blobNoRedirectLimit.Reserve().Delay() != 0 {
+			c.serveCachedBlobRedirect(rw, r, blob, info, t, modTime, size, start)
+			return
+		}
 
-				return struct {
-					io.Reader
-					io.Closer
-				}{
-					Reader: body,
-					Closer: data,
-				}, nil
-			}, size)
-			defer rs.Close()
-
-			http.ServeContent(rw, r, "", modTime, rs)
-
-			c.blobCache.Put(info.Blobs, modTime, size, false)
-
+		err := c.blobNoRedirectLimit.Wait(ctx)
+		if err != nil {
+			c.logger.Info("failed to wait limit", "error", err)
 			return
 		}
 	}
 
+	rw.Header().Set("Content-Type", "application/octet-stream")
+
+	rs := seeker.NewReadSeekCloser(func(start int64) (io.ReadCloser, error) {
+		data, err := c.cache.GetBlobWithOffset(ctx, info.Blobs, start)
+		if err != nil {
+			return nil, err
+		}
+
+		var body io.Reader = data
+		if t.RateLimitPerSecond > 0 {
+			limit := rate.NewLimiter(rate.Limit(t.RateLimitPerSecond), 1024)
+			body = throttled.NewThrottledReader(ctx, body, limit)
+		}
+
+		if c.blobNoRedirectLimit != nil {
+			body = throttled.NewThrottledReader(ctx, body, c.blobNoRedirectLimit)
+		}
+
+		return struct {
+			io.Reader
+			io.Closer
+		}{
+			Reader: body,
+			Closer: data,
+		}, nil
+	}, size)
+	defer rs.Close()
+
+	http.ServeContent(rw, r, "", modTime, rs)
+
+	c.blobCache.Put(info.Blobs, modTime, size, false)
+
+	return
+}
+
+func (c *Agent) serveCachedBlobRedirect(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, modTime time.Time, size int64, start time.Time) {
 	c.rateLimit(rw, r, info.Blobs, info, t, size, start)
 
 	referer := r.RemoteAddr

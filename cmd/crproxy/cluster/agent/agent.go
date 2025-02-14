@@ -50,6 +50,7 @@ type flagpole struct {
 	BlobNoRedirectSize             int
 	BlobNoRedirectMaxSizePerSecond int
 	BlobCacheDuration              time.Duration
+	ForceBlobNoRedirect            bool
 
 	Concurrency int
 
@@ -97,6 +98,7 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().IntVar(&flags.BlobNoRedirectSize, "blob-no-redirect-size", flags.BlobNoRedirectSize, "Less than or equal to no redirect")
 	cmd.Flags().IntVar(&flags.BlobNoRedirectMaxSizePerSecond, "blob-no-redirect-max-size-per-second", flags.BlobNoRedirectMaxSizePerSecond, "Maximum size per second for no redirect")
 	cmd.Flags().DurationVar(&flags.BlobCacheDuration, "blob-cache-duration", flags.BlobCacheDuration, "Blob cache duration")
+	cmd.Flags().BoolVar(&flags.ForceBlobNoRedirect, "force-blob-no-redirect", flags.ForceBlobNoRedirect, "Force blob no redirect")
 
 	cmd.Flags().IntVar(&flags.Concurrency, "concurrency", flags.Concurrency, "Concurrency to source")
 
@@ -145,6 +147,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		agent.WithBlobNoRedirectSize(flags.BlobNoRedirectSize),
 		agent.WithBlobNoRedirectMaxSizePerSecond(flags.BlobNoRedirectMaxSizePerSecond),
 		agent.WithBlobCacheDuration(flags.BlobCacheDuration),
+		agent.WithForceBlobNoRedirect(flags.ForceBlobNoRedirect),
 		agent.WithConcurrency(flags.Concurrency),
 	)
 

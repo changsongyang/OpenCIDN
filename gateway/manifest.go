@@ -38,23 +38,14 @@ func (c *Gateway) worker(ctx context.Context) {
 func (c *Gateway) cacheManifestResponse(rw http.ResponseWriter, r *http.Request, info *PathInfo, t *token.Token) {
 	ctx := r.Context()
 
-	var fallback bool
-	var cancel func()
-
-	done, fallback := c.tryFirstServeCachedManifest(rw, r, info, t)
+	done := c.tryFirstServeCachedManifest(rw, r, info, t)
 	if done {
 		return
-	}
-	if fallback && c.recacheMaxWait > 0 {
-		ctx, cancel = context.WithTimeout(ctx, c.recacheMaxWait)
-		defer cancel()
 	}
 
 	select {
 	case <-ctx.Done():
-		if fallback && c.serveCachedManifest(rw, r, info, true, "fallback") {
-			return
-		}
+		utils.ServeError(rw, r, ctx.Err(), 0)
 		return
 	case <-c.queue.AddWeight(*info, t.Weight):
 	}
@@ -291,7 +282,7 @@ func (c *Gateway) cacheQueueManifest(info *PathInfo, weight int) error {
 	} else {
 		msg = fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
 	}
-	spec, err := c.waitingQueue(ctx, msg, weight+1)
+	spec, err := c.waitingQueue(ctx, msg, weight)
 	if err != nil {
 		return err
 	}
@@ -339,23 +330,23 @@ func (c *Gateway) cacheQueueManifest(info *PathInfo, weight int) error {
 	return nil
 }
 
-func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo, t *token.Token) (done bool, fallback bool) {
+func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo, t *token.Token) (done bool) {
 	val, ok := c.manifestCache.Get(info)
 	if ok {
 		if val.Error != nil {
 			utils.ServeError(rw, r, val.Error, val.StatusCode)
-			return true, false
+			return true
 		}
 
 		if val.MediaType == "" || val.Length == "" {
-			return c.serveCachedManifest(rw, r, info, true, "hit and mark"), false
+			return c.serveCachedManifest(rw, r, info, true, "hit and mark")
 		}
 
 		if r.Method == http.MethodHead {
 			rw.Header().Set("Docker-Content-Digest", val.Digest)
 			rw.Header().Set("Content-Type", val.MediaType)
 			rw.Header().Set("Content-Length", val.Length)
-			return true, false
+			return true
 		}
 
 		if len(val.Body) != 0 {
@@ -363,23 +354,24 @@ func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Re
 			rw.Header().Set("Content-Type", val.MediaType)
 			rw.Header().Set("Content-Length", val.Length)
 			rw.Write(val.Body)
-			return true, false
+			return true
 		}
 
-		return c.serveCachedManifest(rw, r, info, false, "hit"), false
+		return c.serveCachedManifest(rw, r, info, false, "hit")
 	}
 
 	if info.IsDigestManifests {
-		return c.serveCachedManifest(rw, r, info, true, "try"), false
+		return c.serveCachedManifest(rw, r, info, true, "try")
 	}
 
 	if t.CacheFirst {
-		return c.serveCachedManifest(rw, r, info, true, "try"), false
+		return c.serveCachedManifest(rw, r, info, true, "try")
 	}
 
-	if c.recacheMaxWait > 0 &&
-		c.checkCachedManifest(rw, r, info) {
-		return false, true
+	ok, _ = c.cache.StatManifest(r.Context(), info.Host, info.Image, info.Manifests)
+	if ok {
+		c.queue.AddWeight(*info, 0)
+		return c.serveCachedManifest(rw, r, info, true, "try")
 	}
 
 	if t.ManifestWithQueueSync {
@@ -387,13 +379,13 @@ func (c *Gateway) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Re
 			err := c.cacheQueueManifest(info, t.Weight)
 			if err != nil {
 				c.manifestCache.PutError(info, err, http.StatusForbidden)
-				return false, false
+				return false
 			}
-			return true, false
+			return true
 		}
 	}
 
-	return false, false
+	return false
 }
 
 func (c *Gateway) missServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) (done bool) {
@@ -427,11 +419,6 @@ func (c *Gateway) missServeCachedManifest(rw http.ResponseWriter, r *http.Reques
 	}
 
 	return false
-}
-
-func (c *Gateway) checkCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo) bool {
-	ok, _ := c.cache.StatManifest(r.Context(), info.Host, info.Image, info.Manifests)
-	return ok
 }
 
 func (c *Gateway) serveCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo, recache bool, phase string) bool {

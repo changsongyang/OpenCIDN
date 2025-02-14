@@ -73,10 +73,11 @@ type flagpole struct {
 
 func NewCommand() *cobra.Command {
 	flags := &flagpole{
-		Address:           ":18001",
-		BlobCacheDuration: time.Hour,
-		Concurrency:       10,
-		SignLink:          true,
+		Address:               ":18001",
+		BlobCacheDuration:     time.Hour,
+		ManifestCacheDuration: time.Hour,
+		Concurrency:           10,
+		SignLink:              true,
 	}
 
 	cmd := &cobra.Command{
@@ -197,7 +198,6 @@ func runE(ctx context.Context, flags *flagpole) error {
 		gatewayOpts = append(gatewayOpts,
 			gateway.WithCache(sdcache),
 			gateway.WithManifestCacheDuration(flags.ManifestCacheDuration),
-			gateway.WithRecacheMaxWait(flags.RecacheMaxWaitDuration),
 		)
 
 		agentOpts = append(agentOpts,

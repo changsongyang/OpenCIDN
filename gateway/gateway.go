@@ -40,7 +40,6 @@ type Gateway struct {
 	logger          *slog.Logger
 	disableTagsList bool
 	cache           *cache.Cache
-	recacheMaxWait  time.Duration
 
 	manifestCacheDuration time.Duration
 	manifestCache         *manifestCache
@@ -102,12 +101,6 @@ func WithAuthenticator(authenticator *token.Authenticator) Option {
 func WithCache(cache *cache.Cache) Option {
 	return func(c *Gateway) {
 		c.cache = cache
-	}
-}
-
-func WithRecacheMaxWait(recacheMaxWait time.Duration) Option {
-	return func(c *Gateway) {
-		c.recacheMaxWait = recacheMaxWait
 	}
 }
 

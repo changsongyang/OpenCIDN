@@ -684,7 +684,6 @@ func (d *driver) Writer(ctx context.Context, path string, appendParam bool) (sto
 			break
 		}
 
-		var allParts []*s3.Part
 		for _, multi := range resp.Uploads {
 			if key != *multi.Key {
 				continue
@@ -698,6 +697,8 @@ func (d *driver) Writer(ctx context.Context, path string, appendParam bool) (sto
 			if err != nil {
 				return nil, parseError(path, err)
 			}
+
+			var allParts []*s3.Part
 			allParts = append(allParts, partsList.Parts...)
 			for *partsList.IsTruncated {
 				partsList, err = d.S3.ListPartsWithContext(ctx, &s3.ListPartsInput{
@@ -1350,9 +1351,7 @@ func (w *writer) Write(p []byte) (int, error) {
 			w.reset()
 
 			if _, err := io.Copy(w.buf, resp.Body); err != nil {
-				if err != nil {
-					return 0, err
-				}
+				return 0, err
 			}
 		} else {
 			// Otherwise we can use the old file as the new first part

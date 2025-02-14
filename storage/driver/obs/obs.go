@@ -406,6 +406,8 @@ func (d *driver) Writer(ctx context.Context, path string, appendParam bool) (sto
 		return d.newWriter(key, initOutput.UploadId, nil), nil
 	}
 
+	// TODO: It lost progress when uploading large files (400GiM).
+
 	listMultipartUploadsInput := &obs.ListMultipartUploadsInput{
 		Bucket: d.Bucket,
 		Prefix: key,
@@ -423,7 +425,6 @@ func (d *driver) Writer(ctx context.Context, path string, appendParam bool) (sto
 			break
 		}
 
-		var allParts []obs.Part
 		for _, multi := range output.Uploads {
 			if key != multi.Key {
 				continue
@@ -437,6 +438,8 @@ func (d *driver) Writer(ctx context.Context, path string, appendParam bool) (sto
 			if err != nil {
 				return nil, d.parseError(path, err)
 			}
+
+			var allParts []obs.Part
 			allParts = append(allParts, partsList.Parts...)
 			for partsList.IsTruncated {
 				partsList, err = d.Client.ListParts(&obs.ListPartsInput{

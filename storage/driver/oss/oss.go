@@ -312,6 +312,8 @@ func (d *driver) Writer(ctx context.Context, path string, append bool) (storaged
 		}
 		return d.newWriter(key, multi, nil), nil
 	}
+
+	// TODO: It seems to be split into a maximum of 1000 parts
 	multis, _, err := d.Bucket.ListMulti(key, "")
 	if err != nil {
 		return nil, parseError(path, err)
@@ -323,10 +325,6 @@ func (d *driver) Writer(ctx context.Context, path string, append bool) (storaged
 		parts, err := multi.ListParts()
 		if err != nil {
 			return nil, parseError(path, err)
-		}
-		var multiSize int64
-		for _, part := range parts {
-			multiSize += part.Size
 		}
 		return d.newWriter(key, multi, parts), nil
 	}

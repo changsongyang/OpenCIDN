@@ -21,7 +21,6 @@ import (
 	"github.com/daocloud/crproxy/internal/spec"
 	"github.com/daocloud/crproxy/queue/client"
 	"github.com/daocloud/crproxy/queue/model"
-	csync "github.com/daocloud/crproxy/sync"
 	"github.com/wzshiming/httpseek"
 	"github.com/wzshiming/sss"
 )
@@ -36,7 +35,6 @@ type Runner struct {
 	caches      []*cache.Cache
 	httpClient  *http.Client
 	queueClient *client.MessageClient
-	syncManager *csync.SyncManager
 	lease       string
 
 	pendingMut  sync.Mutex

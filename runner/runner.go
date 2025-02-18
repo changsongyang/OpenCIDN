@@ -442,69 +442,33 @@ func (r *Runner) blob(ctx context.Context, host, name, blob string, size int64, 
 	}
 
 	if r.resumeSize != 0 && size > int64(r.resumeSize) {
-		if len(subCaches) == 1 {
-			f, err := subCaches[0].BlobWriter(ctx, blob, true)
+		var offset int64 = math.MaxInt
+
+		rbws := []sss.FileWriter{}
+		for _, cache := range subCaches {
+			f, err := cache.BlobWriter(ctx, blob, true)
 			if err == nil {
+				if offset != 0 {
+					offset = min(offset, f.Size())
+				}
+				rbws = append(rbws, f)
 
-				seeker := httpseek.NewSeekerWithHTTPClient(ctx, r.httpClient, req)
-
-				_, err = seeker.Seek(f.Size(), 0)
+			} else {
+				offset = 0
+				f, err = cache.BlobWriter(ctx, blob, false)
 				if err != nil {
 					return err
 				}
-
-				progress.Store(f.Size())
-
-				body := &readerCounter{
-					r:       seeker,
-					counter: progress,
-				}
-				_, err = io.Copy(f, body)
-				if err != nil {
-					return err
-				}
-
-				err = f.Commit(ctx)
-				if err != nil {
-					return err
-				}
-
-				fi, err := subCaches[0].StatBlob(ctx, blob)
-				if err != nil {
-					return err
-				}
-
-				if fi.Size() != size {
-					err := subCaches[0].DeleteBlob(ctx, blob)
-					if err != nil {
-						return fmt.Errorf("%s is %d, but expected %d: %w", blob, fi.Size(), size, err)
-					}
-					return fmt.Errorf("%s is %d, but expected %d", blob, fi.Size(), size)
-				}
-				return nil
+				rbws = append(rbws, f)
 			}
-		} else {
-			var offset int64 = math.MaxInt
+		}
 
-			rbws := []sss.FileWriter{}
-			for _, cache := range subCaches {
-				f, err := cache.BlobWriter(ctx, blob, true)
-				if err == nil {
-					if offset != 0 {
-						offset = min(offset, f.Size())
-					}
-					rbws = append(rbws, f)
+		if offset > size {
+			return fmt.Errorf("offset %d exceeds expected size %d", offset, size)
+		}
+		progress.Store(offset)
 
-				} else {
-					offset = 0
-					f, err = cache.BlobWriter(ctx, blob, false)
-					if err != nil {
-						return err
-					}
-					rbws = append(rbws, f)
-				}
-			}
-
+		if offset != size {
 			var writers []io.Writer
 			for _, w := range rbws {
 				n := w.Size() - offset
@@ -521,16 +485,22 @@ func (r *Runner) blob(ctx context.Context, host, name, blob string, size int64, 
 			}
 
 			seeker := httpseek.NewSeekerWithHTTPClient(ctx, r.httpClient, req)
+			defer seeker.Close()
 
-			_, err := seeker.Seek(offset, 0)
+			reader := httpseek.NewMustReadSeeker(seeker, 0, func(retry int, err error) error {
+				if retry > 2 {
+					return err
+				}
+				r.logger.Warn("blob reader", "retry", retry, "digest", blob, "error", err)
+				return nil
+			})
+			_, err := reader.Seek(offset, io.SeekStart)
 			if err != nil {
 				return err
 			}
 
-			progress.Store(offset)
-
 			body := &readerCounter{
-				r:       seeker,
+				r:       reader,
 				counter: progress,
 			}
 
@@ -542,33 +512,33 @@ func (r *Runner) blob(ctx context.Context, host, name, blob string, size int64, 
 			if offset+n != size {
 				return fmt.Errorf("copy blob failed: expected size %d, got offset %d, append %d", size, offset, n)
 			}
-
-			var errs []error
-			for _, c := range rbws {
-				err := c.Commit(ctx)
-				if err != nil {
-					errs = append(errs, err)
-				}
-			}
-
-			for _, cache := range subCaches {
-				fi, err := cache.StatBlob(ctx, blob)
-				if err != nil {
-					errs = append(errs, err)
-					continue
-				}
-
-				if fi.Size() != size {
-					if err := cache.DeleteBlob(ctx, blob); err != nil {
-						errs = append(errs, fmt.Errorf("%s is %d, but expected %d: %w", blob, fi.Size(), size, err))
-					} else {
-						errs = append(errs, fmt.Errorf("%s is %d, but expected %d", blob, fi.Size(), size))
-					}
-				}
-			}
-
-			return errors.Join(errs...)
 		}
+
+		var errs []error
+		for _, c := range rbws {
+			err := c.Commit(ctx)
+			if err != nil {
+				errs = append(errs, err)
+			}
+		}
+
+		for _, cache := range subCaches {
+			fi, err := cache.StatBlob(ctx, blob)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+
+			if fi.Size() != size {
+				if err := cache.DeleteBlob(ctx, blob); err != nil {
+					errs = append(errs, fmt.Errorf("%s is %d, but expected %d: %w", blob, fi.Size(), size, err))
+				} else {
+					errs = append(errs, fmt.Errorf("%s is %d, but expected %d", blob, fi.Size(), size))
+				}
+			}
+		}
+
+		return errors.Join(errs...)
 	}
 
 	resp, err := r.httpClient.Do(req)

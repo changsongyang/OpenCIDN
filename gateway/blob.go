@@ -21,7 +21,7 @@ func (c *Gateway) blob(rw http.ResponseWriter, r *http.Request, info *PathInfo, 
 		return
 	}
 
-	if c.agent != nil {
+	if c.agent != nil && c.cache != nil {
 		c.agent.Serve(rw, r, &agent.BlobInfo{
 			Host:  info.Host,
 			Image: info.Image,

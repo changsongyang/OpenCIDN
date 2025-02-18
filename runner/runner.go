@@ -446,7 +446,7 @@ func (r *Runner) blob(ctx context.Context, host, name, blob string, size int64, 
 			f, err := subCaches[0].BlobWriter(ctx, blob, true)
 			if err == nil {
 
-				seeker := httpseek.NewSeeker(ctx, r.httpClient.Transport, req)
+				seeker := httpseek.NewSeekerWithHTTPClient(ctx, r.httpClient, req)
 
 				_, err = seeker.Seek(f.Size(), 0)
 				if err != nil {
@@ -520,7 +520,7 @@ func (r *Runner) blob(ctx context.Context, host, name, blob string, size int64, 
 				}
 			}
 
-			seeker := httpseek.NewSeeker(ctx, r.httpClient.Transport, req)
+			seeker := httpseek.NewSeekerWithHTTPClient(ctx, r.httpClient, req)
 
 			_, err := seeker.Seek(offset, 0)
 			if err != nil {

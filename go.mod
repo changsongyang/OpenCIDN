@@ -15,7 +15,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	github.com/wzshiming/cmux v0.4.2
 	github.com/wzshiming/hostmatcher v0.0.3
-	github.com/wzshiming/httpseek v0.2.0
+	github.com/wzshiming/httpseek v0.4.0
 	github.com/wzshiming/imc v0.0.0-20250106051804-1cb884b5184a
 	github.com/wzshiming/sss v0.0.0-20250217062824-3687ab53ed28
 	golang.org/x/crypto v0.28.0

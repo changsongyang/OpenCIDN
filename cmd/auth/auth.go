@@ -16,7 +16,7 @@ import (
 	"github.com/OpenCIDN/OpenCIDN/internal/pki"
 	"github.com/OpenCIDN/OpenCIDN/internal/server"
 	"github.com/OpenCIDN/OpenCIDN/internal/signals"
-	"github.com/OpenCIDN/OpenCIDN/pkg/manager"
+	"github.com/OpenCIDN/OpenCIDN/pkg/auth"
 	"github.com/OpenCIDN/OpenCIDN/pkg/signing"
 	"github.com/OpenCIDN/OpenCIDN/pkg/token"
 	"github.com/emicklei/go-restful/v3"
@@ -132,7 +132,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 
 	container := restful.NewContainer()
 
-	var mgr *manager.Manager
+	var mgr *auth.AuthManager
 	if flags.DBURL != "" {
 		dburl := flags.DBURL
 		db, err := sql.Open("mysql", dburl)
@@ -147,7 +147,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 
 		logger.Info("Connected to DB")
 
-		mgr = manager.NewManager(privateKey, flags.AdminToken, db)
+		mgr = auth.NewAuthManager(privateKey, flags.AdminToken, db)
 
 		mgr.Register(container)
 

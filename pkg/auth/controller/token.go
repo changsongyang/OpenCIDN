@@ -6,8 +6,8 @@ import (
 	"strconv"
 
 	"github.com/OpenCIDN/OpenCIDN/internal/slices"
-	"github.com/OpenCIDN/OpenCIDN/pkg/manager/model"
-	"github.com/OpenCIDN/OpenCIDN/pkg/manager/service"
+	"github.com/OpenCIDN/OpenCIDN/pkg/auth/model"
+	"github.com/OpenCIDN/OpenCIDN/pkg/auth/service"
 	"github.com/emicklei/go-restful/v3"
 )
 

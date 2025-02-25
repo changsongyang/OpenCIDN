@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/OpenCIDN/OpenCIDN/pkg/manager/dao"
-	"github.com/OpenCIDN/OpenCIDN/pkg/manager/model"
+	"github.com/OpenCIDN/OpenCIDN/pkg/auth/dao"
+	"github.com/OpenCIDN/OpenCIDN/pkg/auth/model"
 )
 
 type TokenService struct {

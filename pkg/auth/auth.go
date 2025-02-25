@@ -1,4 +1,4 @@
-package manager
+package auth
 
 import (
 	"context"
@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/OpenCIDN/OpenCIDN/internal/format"
-	"github.com/OpenCIDN/OpenCIDN/pkg/manager/controller"
-	"github.com/OpenCIDN/OpenCIDN/pkg/manager/dao"
-	"github.com/OpenCIDN/OpenCIDN/pkg/manager/model"
-	"github.com/OpenCIDN/OpenCIDN/pkg/manager/service"
+	"github.com/OpenCIDN/OpenCIDN/pkg/auth/controller"
+	"github.com/OpenCIDN/OpenCIDN/pkg/auth/dao"
+	"github.com/OpenCIDN/OpenCIDN/pkg/auth/model"
+	"github.com/OpenCIDN/OpenCIDN/pkg/auth/service"
 	"github.com/OpenCIDN/OpenCIDN/pkg/token"
 	restfulspec "github.com/emicklei/go-restful-openapi/v2"
 	"github.com/emicklei/go-restful/v3"
@@ -22,7 +22,7 @@ import (
 	"github.com/wzshiming/imc"
 )
 
-type Manager struct {
+type AuthManager struct {
 	key        *rsa.PrivateKey
 	adminToken string
 	db         *sql.DB
@@ -44,8 +44,8 @@ type Manager struct {
 	cacheTTL      time.Duration
 }
 
-func NewManager(key *rsa.PrivateKey, adminToken string, db *sql.DB) *Manager {
-	m := &Manager{
+func NewAuthManager(key *rsa.PrivateKey, adminToken string, db *sql.DB) *AuthManager {
+	m := &AuthManager{
 		key:           key,
 		adminToken:    adminToken,
 		db:            db,
@@ -56,7 +56,7 @@ func NewManager(key *rsa.PrivateKey, adminToken string, db *sql.DB) *Manager {
 	return m
 }
 
-func (m *Manager) InitTable(ctx context.Context) {
+func (m *AuthManager) InitTable(ctx context.Context) {
 	ctx = dao.WithDB(ctx, m.db)
 	m.UserDAO.InitTable(ctx)
 	m.LoginDAO.InitTable(ctx)
@@ -64,7 +64,7 @@ func (m *Manager) InitTable(ctx context.Context) {
 	m.RegistryDAO.InitTable(ctx)
 }
 
-func (m *Manager) Register(container *restful.Container) {
+func (m *AuthManager) Register(container *restful.Container) {
 	m.UserDAO = dao.NewUser()
 	m.LoginDAO = dao.NewLogin()
 	m.TokenDAO = dao.NewToken()
@@ -90,7 +90,7 @@ func (m *Manager) Register(container *restful.Container) {
 		APIPath:     "/swagger.json",
 		PostBuildSwaggerObjectHandler: func(s *spec.Swagger) {
 			s.Info = &spec.Info{}
-			s.Info.Title = "OpenCIDN Manager"
+			s.Info.Title = "OpenCIDN AuthManager"
 			s.Schemes = []string{"https", "http"}
 			s.SecurityDefinitions = spec.SecurityDefinitions{
 				"BearerHeader": {
@@ -111,7 +111,7 @@ func (m *Manager) Register(container *restful.Container) {
 	container.Add(restfulspec.NewOpenAPIService(config))
 }
 
-func (m *Manager) getRegistry(ctx context.Context, t *token.Token) (registryCache, error) {
+func (m *AuthManager) getRegistry(ctx context.Context, t *token.Token) (registryCache, error) {
 	up := t.Service
 
 	m.registryCache.Evict(nil)
@@ -144,7 +144,7 @@ func (m *Manager) getRegistry(ctx context.Context, t *token.Token) (registryCach
 	return rc, nil
 }
 
-func (m *Manager) getToken(ctx context.Context, userinfo *url.Userinfo, t *token.Token, registry registryCache) (model.Token, error) {
+func (m *AuthManager) getToken(ctx context.Context, userinfo *url.Userinfo, t *token.Token, registry registryCache) (model.Token, error) {
 	if userinfo == nil {
 		if len(registry.Registry.Data.SpecialIPs) != 0 {
 			tt, ok := registry.Registry.Data.SpecialIPs[t.IP]
@@ -210,7 +210,7 @@ func getHostAndImage(repo string, allowPrefix bool, source string) (host string,
 	return "", "", fmt.Errorf("invalid repository: %q, source: %q", repo, source)
 }
 
-func (m *Manager) GetTokenWithUser(ctx context.Context, userinfo *url.Userinfo, t *token.Token) (token.Attribute, error) {
+func (m *AuthManager) GetTokenWithUser(ctx context.Context, userinfo *url.Userinfo, t *token.Token) (token.Attribute, error) {
 	registry, err := m.getRegistry(ctx, t)
 	if err != nil {
 		return token.Attribute{}, err

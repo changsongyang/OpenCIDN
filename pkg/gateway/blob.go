@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/OpenCIDN/OpenCIDN/pkg/agent"
+	"github.com/OpenCIDN/OpenCIDN/pkg/blobs"
 	"github.com/OpenCIDN/OpenCIDN/pkg/token"
 )
 
@@ -22,7 +22,7 @@ func (c *Gateway) blob(rw http.ResponseWriter, r *http.Request, info *PathInfo, 
 	}
 
 	if c.agent != nil && c.cache != nil {
-		c.agent.Serve(rw, r, &agent.BlobInfo{
+		c.agent.Serve(rw, r, &blobs.BlobInfo{
 			Host:  info.Host,
 			Image: info.Image,
 			Blobs: info.Blobs,

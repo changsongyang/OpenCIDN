@@ -13,7 +13,7 @@ import (
 	"github.com/OpenCIDN/OpenCIDN/internal/queue"
 	"github.com/OpenCIDN/OpenCIDN/internal/throttled"
 	"github.com/OpenCIDN/OpenCIDN/internal/utils"
-	"github.com/OpenCIDN/OpenCIDN/pkg/agent"
+	"github.com/OpenCIDN/OpenCIDN/pkg/blobs"
 	"github.com/OpenCIDN/OpenCIDN/pkg/cache"
 	"github.com/OpenCIDN/OpenCIDN/pkg/queue/client"
 	"github.com/OpenCIDN/OpenCIDN/pkg/token"
@@ -52,7 +52,7 @@ type Gateway struct {
 	acceptsStr   string
 	accepts      map[string]struct{}
 
-	agent *agent.Agent
+	agent *blobs.Blobs
 
 	queueClient *client.MessageClient
 }
@@ -131,7 +131,7 @@ func WithQueueClient(queueClient *client.MessageClient) Option {
 	}
 }
 
-func WithAgent(a *agent.Agent) Option {
+func WithAgent(a *blobs.Blobs) Option {
 	return func(c *Gateway) {
 		c.agent = a
 	}

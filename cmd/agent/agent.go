@@ -13,7 +13,7 @@ import (
 	"github.com/OpenCIDN/OpenCIDN/internal/pki"
 	"github.com/OpenCIDN/OpenCIDN/internal/server"
 	"github.com/OpenCIDN/OpenCIDN/internal/signals"
-	"github.com/OpenCIDN/OpenCIDN/pkg/agent"
+	"github.com/OpenCIDN/OpenCIDN/pkg/blobs"
 	"github.com/OpenCIDN/OpenCIDN/pkg/cache"
 	"github.com/OpenCIDN/OpenCIDN/pkg/queue/client"
 	"github.com/OpenCIDN/OpenCIDN/pkg/signing"
@@ -77,8 +77,8 @@ func NewCommand() *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:   "agent",
-		Short: "Agent",
+		Use:   "blobs",
+		Short: "Blobs",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runE(cmd.Context(), flags)
 		},
@@ -121,7 +121,7 @@ func NewCommand() *cobra.Command {
 func runE(ctx context.Context, flags *flagpole) error {
 	mux := http.NewServeMux()
 
-	agentOpts := []agent.Option{}
+	agentOpts := []blobs.Option{}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
@@ -152,13 +152,13 @@ func runE(ctx context.Context, flags *flagpole) error {
 	}
 
 	agentOpts = append(agentOpts,
-		agent.WithCache(sdcache),
-		agent.WithLogger(logger),
-		agent.WithBlobNoRedirectSize(flags.BlobNoRedirectSize),
-		agent.WithBlobNoRedirectMaxSizePerSecond(flags.BlobNoRedirectMaxSizePerSecond),
-		agent.WithBlobCacheDuration(flags.BlobCacheDuration),
-		agent.WithForceBlobNoRedirect(flags.ForceBlobNoRedirect),
-		agent.WithConcurrency(flags.Concurrency),
+		blobs.WithCache(sdcache),
+		blobs.WithLogger(logger),
+		blobs.WithBlobNoRedirectSize(flags.BlobNoRedirectSize),
+		blobs.WithBlobNoRedirectMaxSizePerSecond(flags.BlobNoRedirectMaxSizePerSecond),
+		blobs.WithBlobCacheDuration(flags.BlobCacheDuration),
+		blobs.WithForceBlobNoRedirect(flags.ForceBlobNoRedirect),
+		blobs.WithConcurrency(flags.Concurrency),
 	)
 
 	if flags.BigStorageURL != "" && flags.BigStorageSize > 0 {
@@ -178,12 +178,12 @@ func runE(ctx context.Context, flags *flagpole) error {
 		if err != nil {
 			return fmt.Errorf("create cache failed: %w", err)
 		}
-		agentOpts = append(agentOpts, agent.WithBigCache(bigsdcache, flags.BigStorageSize))
+		agentOpts = append(agentOpts, blobs.WithBigCache(bigsdcache, flags.BigStorageSize))
 	}
 
 	if flags.QueueURL != "" {
 		queueClient := client.NewMessageClient(http.DefaultClient, flags.QueueURL, flags.QueueToken)
-		agentOpts = append(agentOpts, agent.WithQueueClient(queueClient))
+		agentOpts = append(agentOpts, blobs.WithQueueClient(queueClient))
 	}
 
 	if flags.TokenPublicKeyFile != "" {
@@ -197,7 +197,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		}
 
 		authenticator := token.NewAuthenticator(token.NewDecoder(signing.NewVerifier(publicKey)), flags.TokenURL)
-		agentOpts = append(agentOpts, agent.WithAuthenticator(authenticator))
+		agentOpts = append(agentOpts, blobs.WithAuthenticator(authenticator))
 	}
 
 	transportOpts := []transport.Option{
@@ -247,11 +247,11 @@ func runE(ctx context.Context, flags *flagpole) error {
 		},
 		Transport: tp,
 	}
-	agentOpts = append(agentOpts, agent.WithClient(httpClient))
+	agentOpts = append(agentOpts, blobs.WithClient(httpClient))
 
-	a, err := agent.NewAgent(agentOpts...)
+	a, err := blobs.NewBlobs(agentOpts...)
 	if err != nil {
-		return fmt.Errorf("create agent failed: %w", err)
+		return fmt.Errorf("create blobs failed: %w", err)
 	}
 
 	mux.Handle("/v2/", a)

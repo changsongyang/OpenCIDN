@@ -121,7 +121,7 @@ func NewCommand() *cobra.Command {
 func runE(ctx context.Context, flags *flagpole) error {
 	mux := http.NewServeMux()
 
-	agentOpts := []blobs.Option{}
+	blobsOpts := []blobs.Option{}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 
@@ -151,7 +151,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		return fmt.Errorf("create cache failed: %w", err)
 	}
 
-	agentOpts = append(agentOpts,
+	blobsOpts = append(blobsOpts,
 		blobs.WithCache(sdcache),
 		blobs.WithLogger(logger),
 		blobs.WithBlobNoRedirectSize(flags.BlobNoRedirectSize),
@@ -178,12 +178,12 @@ func runE(ctx context.Context, flags *flagpole) error {
 		if err != nil {
 			return fmt.Errorf("create cache failed: %w", err)
 		}
-		agentOpts = append(agentOpts, blobs.WithBigCache(bigsdcache, flags.BigStorageSize))
+		blobsOpts = append(blobsOpts, blobs.WithBigCache(bigsdcache, flags.BigStorageSize))
 	}
 
 	if flags.QueueURL != "" {
 		queueClient := client.NewMessageClient(http.DefaultClient, flags.QueueURL, flags.QueueToken)
-		agentOpts = append(agentOpts, blobs.WithQueueClient(queueClient))
+		blobsOpts = append(blobsOpts, blobs.WithQueueClient(queueClient))
 	}
 
 	if flags.TokenPublicKeyFile != "" {
@@ -197,7 +197,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		}
 
 		authenticator := token.NewAuthenticator(token.NewDecoder(signing.NewVerifier(publicKey)), flags.TokenURL)
-		agentOpts = append(agentOpts, blobs.WithAuthenticator(authenticator))
+		blobsOpts = append(blobsOpts, blobs.WithAuthenticator(authenticator))
 	}
 
 	transportOpts := []transport.Option{
@@ -247,9 +247,9 @@ func runE(ctx context.Context, flags *flagpole) error {
 		},
 		Transport: tp,
 	}
-	agentOpts = append(agentOpts, blobs.WithClient(httpClient))
+	blobsOpts = append(blobsOpts, blobs.WithClient(httpClient))
 
-	a, err := blobs.NewBlobs(agentOpts...)
+	a, err := blobs.NewBlobs(blobsOpts...)
 	if err != nil {
 		return fmt.Errorf("create blobs failed: %w", err)
 	}

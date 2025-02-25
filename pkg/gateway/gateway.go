@@ -1,21 +1,17 @@
 package gateway
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/textproto"
 	"net/url"
 	"strings"
-	"time"
 
-	"github.com/OpenCIDN/OpenCIDN/internal/queue"
 	"github.com/OpenCIDN/OpenCIDN/internal/throttled"
 	"github.com/OpenCIDN/OpenCIDN/internal/utils"
 	"github.com/OpenCIDN/OpenCIDN/pkg/blobs"
-	"github.com/OpenCIDN/OpenCIDN/pkg/cache"
-	"github.com/OpenCIDN/OpenCIDN/pkg/queue/client"
+	"github.com/OpenCIDN/OpenCIDN/pkg/manifests"
 	"github.com/OpenCIDN/OpenCIDN/pkg/token"
 	"github.com/docker/distribution/registry/api/errcode"
 	"golang.org/x/time/rate"
@@ -32,29 +28,18 @@ type ImageInfo struct {
 }
 
 type Gateway struct {
-	concurrency int
-	queue       *queue.WeightQueue[PathInfo]
-
 	httpClient      *http.Client
 	modify          func(info *ImageInfo) *ImageInfo
 	logger          *slog.Logger
 	disableTagsList bool
-	cache           *cache.Cache
 
-	manifestCacheDuration time.Duration
-	manifestCache         *manifestCache
-	authenticator         *token.Authenticator
+	authenticator *token.Authenticator
 
 	defaultRegistry         string
 	overrideDefaultRegistry map[string]string
 
-	acceptsItems []string
-	acceptsStr   string
-	accepts      map[string]struct{}
-
-	agent *blobs.Blobs
-
-	queueClient *client.MessageClient
+	blobs     *blobs.Blobs
+	manifests *manifests.Manifests
 }
 
 type Option func(c *Gateway)
@@ -62,15 +47,6 @@ type Option func(c *Gateway)
 func WithClient(client *http.Client) Option {
 	return func(c *Gateway) {
 		c.httpClient = client
-	}
-}
-
-func WithManifestCacheDuration(manifestCacheDuration time.Duration) Option {
-	return func(c *Gateway) {
-		if manifestCacheDuration < 10*time.Second {
-			manifestCacheDuration = 10 * time.Second
-		}
-		c.manifestCacheDuration = manifestCacheDuration
 	}
 }
 
@@ -98,12 +74,6 @@ func WithAuthenticator(authenticator *token.Authenticator) Option {
 	}
 }
 
-func WithCache(cache *cache.Cache) Option {
-	return func(c *Gateway) {
-		c.cache = cache
-	}
-}
-
 func WithDefaultRegistry(target string) Option {
 	return func(c *Gateway) {
 		c.defaultRegistry = target
@@ -116,57 +86,25 @@ func WithOverrideDefaultRegistry(overrideDefaultRegistry map[string]string) Opti
 	}
 }
 
-func WithConcurrency(concurrency int) Option {
+func WithBlobs(a *blobs.Blobs) Option {
 	return func(c *Gateway) {
-		if concurrency < 1 {
-			concurrency = 1
-		}
-		c.concurrency = concurrency
+		c.blobs = a
 	}
 }
 
-func WithQueueClient(queueClient *client.MessageClient) Option {
+func WithManifests(a *manifests.Manifests) Option {
 	return func(c *Gateway) {
-		c.queueClient = queueClient
-	}
-}
-
-func WithAgent(a *blobs.Blobs) Option {
-	return func(c *Gateway) {
-		c.agent = a
+		c.manifests = a
 	}
 }
 
 func NewGateway(opts ...Option) (*Gateway, error) {
 	c := &Gateway{
 		logger: slog.Default(),
-		acceptsItems: []string{
-			"application/vnd.oci.image.index.v1+json",
-			"application/vnd.docker.distribution.manifest.list.v2+json",
-			"application/vnd.oci.image.manifest.v1+json",
-			"application/vnd.docker.distribution.manifest.v2+json",
-		},
-		accepts:               map[string]struct{}{},
-		manifestCacheDuration: time.Minute,
-		queue:                 queue.NewWeightQueue[PathInfo](),
-		concurrency:           10,
 	}
-
-	for _, item := range c.acceptsItems {
-		c.accepts[item] = struct{}{}
-	}
-	c.acceptsStr = strings.Join(c.acceptsItems, ",")
 
 	for _, opt := range opts {
 		opt(c)
-	}
-
-	ctx := context.Background()
-	c.manifestCache = newManifestCache(c.manifestCacheDuration)
-	c.manifestCache.Start(ctx, c.logger)
-
-	for i := 0; i <= c.concurrency; i++ {
-		go c.worker(ctx)
 	}
 
 	return c, nil
@@ -281,10 +219,8 @@ func (c *Gateway) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	if info.Manifests != "" {
-		if c.cache != nil {
-			c.cacheManifestResponse(rw, r, info, &t)
-			return
-		}
+		c.manifest(rw, r, info, &t)
+		return
 	}
 	c.forward(rw, r, info, &t)
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/OpenCIDN/OpenCIDN/pkg/blobs"
 	"github.com/OpenCIDN/OpenCIDN/pkg/cache"
 	"github.com/OpenCIDN/OpenCIDN/pkg/gateway"
+	"github.com/OpenCIDN/OpenCIDN/pkg/manifests"
 	"github.com/OpenCIDN/OpenCIDN/pkg/queue/client"
 	"github.com/OpenCIDN/OpenCIDN/pkg/signing"
 	"github.com/OpenCIDN/OpenCIDN/pkg/token"
@@ -146,15 +147,18 @@ func runE(ctx context.Context, flags *flagpole) error {
 	mux := http.NewServeMux()
 
 	gatewayOpts := []gateway.Option{}
-	agentOpts := []blobs.Option{}
+	blobsOpts := []blobs.Option{}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+
+	manifestsOpts := []manifests.Option{
+		manifests.WithConcurrency(flags.Concurrency),
+	}
 
 	gatewayOpts = append(gatewayOpts,
 		gateway.WithLogger(logger),
 		gateway.WithDefaultRegistry(flags.DefaultRegistry),
 		gateway.WithOverrideDefaultRegistry(flags.OverrideDefaultRegistry),
-		gateway.WithConcurrency(flags.Concurrency),
 		gateway.WithPathInfoModifyFunc(func(info *gateway.ImageInfo) *gateway.ImageInfo {
 			if len(flags.RegistryAlias) != 0 {
 				h, ok := flags.RegistryAlias[info.Host]
@@ -169,7 +173,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		gateway.WithDisableTagsList(flags.DisableTagsList),
 	)
 
-	agentOpts = append(agentOpts,
+	blobsOpts = append(blobsOpts,
 		blobs.WithLogger(logger),
 		blobs.WithConcurrency(flags.Concurrency),
 		blobs.WithBlobNoRedirectSize(flags.BlobNoRedirectSize),
@@ -205,12 +209,12 @@ func runE(ctx context.Context, flags *flagpole) error {
 		if err != nil {
 			return fmt.Errorf("create cache failed: %w", err)
 		}
-		gatewayOpts = append(gatewayOpts,
-			gateway.WithCache(sdcache),
-			gateway.WithManifestCacheDuration(flags.ManifestCacheDuration),
+		manifestsOpts = append(manifestsOpts,
+			manifests.WithCache(sdcache),
+			manifests.WithManifestCacheDuration(flags.ManifestCacheDuration),
 		)
 
-		agentOpts = append(agentOpts,
+		blobsOpts = append(blobsOpts,
 			blobs.WithCache(sdcache),
 		)
 
@@ -231,7 +235,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 			if err != nil {
 				return fmt.Errorf("create cache failed: %w", err)
 			}
-			agentOpts = append(agentOpts, blobs.WithBigCache(bigsdcache, flags.BigStorageSize))
+			blobsOpts = append(blobsOpts, blobs.WithBigCache(bigsdcache, flags.BigStorageSize))
 		}
 	}
 
@@ -250,7 +254,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 
 		authenticator := token.NewAuthenticator(token.NewDecoder(signing.NewVerifier(publicKey)), flags.TokenURL)
 		gatewayOpts = append(gatewayOpts, gateway.WithAuthenticator(authenticator))
-		agentOpts = append(agentOpts, blobs.WithAuthenticator(authenticator))
+		blobsOpts = append(blobsOpts, blobs.WithAuthenticator(authenticator))
 	}
 
 	transportOpts := []transport.Option{
@@ -282,8 +286,8 @@ func runE(ctx context.Context, flags *flagpole) error {
 
 	if flags.QueueURL != "" {
 		queueClient := client.NewMessageClient(http.DefaultClient, flags.QueueURL, flags.QueueToken)
-		gatewayOpts = append(gatewayOpts, gateway.WithQueueClient(queueClient))
-		agentOpts = append(agentOpts, blobs.WithQueueClient(queueClient))
+		manifestsOpts = append(manifestsOpts, manifests.WithQueueClient(queueClient))
+		blobsOpts = append(blobsOpts, blobs.WithQueueClient(queueClient))
 	}
 
 	tp = transport.NewLogTransport(tp, logger, time.Second)
@@ -307,16 +311,25 @@ func runE(ctx context.Context, flags *flagpole) error {
 		Transport: tp,
 	}
 	gatewayOpts = append(gatewayOpts, gateway.WithClient(httpClient))
-	agentOpts = append(agentOpts, blobs.WithClient(httpClient))
+	blobsOpts = append(blobsOpts, blobs.WithClient(httpClient))
 
-	a, err := blobs.NewBlobs(
-		agentOpts...,
+	manifest, err := manifests.NewManifests(
+		manifestsOpts...,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create manifests: %w", err)
+	}
+	blob, err := blobs.NewBlobs(
+		blobsOpts...,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create blobs: %w", err)
 	}
 
-	gatewayOpts = append(gatewayOpts, gateway.WithAgent(a))
+	gatewayOpts = append(gatewayOpts,
+		gateway.WithManifests(manifest),
+		gateway.WithBlobs(blob),
+	)
 
 	gw, err := gateway.NewGateway(gatewayOpts...)
 	if err != nil {

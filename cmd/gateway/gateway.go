@@ -311,6 +311,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		Transport: tp,
 	}
 	gatewayOpts = append(gatewayOpts, gateway.WithClient(httpClient))
+	manifestsOpts = append(manifestsOpts, manifests.WithClient(httpClient))
 	blobsOpts = append(blobsOpts, blobs.WithClient(httpClient))
 
 	manifest, err := manifests.NewManifests(

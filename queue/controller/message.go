@@ -280,7 +280,7 @@ func (mc *MessageController) Schedule(ctx context.Context, logger *slog.Logger) 
 						MessageID: item.MessageID,
 						Content:   item.Content,
 						Priority:  item.Priority,
-						Status:    model.StatusPending,
+						Status:    model.StatusCleanup,
 						Data:      item.Data,
 					})
 				}

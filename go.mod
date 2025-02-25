@@ -22,10 +22,7 @@ require (
 	golang.org/x/time v0.10.0
 )
 
-replace (
-	github.com/denverdino/aliyungo => github.com/wzshiming/aliyungo v0.0.0-20241126040137-4b8c22b50cd3
-	github.com/docker/distribution => github.com/distribution/distribution v2.8.3+incompatible
-)
+replace github.com/docker/distribution => github.com/distribution/distribution v2.8.3+incompatible
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

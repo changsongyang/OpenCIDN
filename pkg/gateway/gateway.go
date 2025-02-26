@@ -100,7 +100,8 @@ func WithManifests(a *manifests.Manifests) Option {
 
 func NewGateway(opts ...Option) (*Gateway, error) {
 	c := &Gateway{
-		logger: slog.Default(),
+		logger:     slog.Default(),
+		httpClient: http.DefaultClient,
 	}
 
 	for _, opt := range opts {
@@ -244,6 +245,10 @@ func (c *Gateway) forward(rw http.ResponseWriter, r *http.Request, info *PathInf
 		return
 	}
 
+	if info.Manifests != "" {
+		forwardReq.Header.Set("Accept", acceptsStr)
+	}
+
 	resp, err := c.httpClient.Do(forwardReq)
 	if err != nil {
 		c.logger.Warn("failed to request", "host", info.Host, "image", info.Image, "error", err)
@@ -288,3 +293,5 @@ func (c *Gateway) forward(rw http.ResponseWriter, r *http.Request, info *PathInf
 		io.Copy(rw, body)
 	}
 }
+
+var acceptsStr = "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json"

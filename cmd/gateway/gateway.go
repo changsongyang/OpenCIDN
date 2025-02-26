@@ -144,15 +144,92 @@ func NewCommand() *cobra.Command {
 }
 
 func runE(ctx context.Context, flags *flagpole) error {
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	transportOpts := []transport.Option{
+		transport.WithUserAndPass(flags.Userpass),
+		transport.WithLogger(logger),
+	}
+
+	tp, err := transport.NewTransport(transportOpts...)
+	if err != nil {
+		return fmt.Errorf("create clientset failed: %w", err)
+	}
+
+	if flags.RetryInterval > 0 {
+		tp = httpseek.NewMustReaderTransport(tp, func(request *http.Request, retry int, err error) error {
+			if errors.Is(err, context.Canceled) ||
+				errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			if flags.Retry > 0 && retry >= flags.Retry {
+				return err
+			}
+			if logger != nil {
+				logger.Warn("Retry", "url", request.URL, "retry", retry, "error", err)
+			}
+			time.Sleep(flags.RetryInterval)
+			return nil
+		})
+	}
+
+	tp = transport.NewLogTransport(tp, logger, time.Second)
+
+	httpClient := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) > 10 {
+				return http.ErrUseLastResponse
+			}
+			s := make([]string, 0, len(via)+1)
+			for _, v := range via {
+				s = append(s, v.URL.String())
+			}
+
+			lastRedirect := req.URL.String()
+			s = append(s, lastRedirect)
+			logger.Info("redirect", "redirects", s)
+
+			return nil
+		},
+		Transport: tp,
+	}
+
+	var authenticator *token.Authenticator
+	if flags.TokenPublicKeyFile != "" {
+		if flags.TokenURL == "" {
+			return fmt.Errorf("token url is required")
+		}
+		publicKeyData, err := os.ReadFile(flags.TokenPublicKeyFile)
+		if err != nil {
+			return fmt.Errorf("failed to read token public key file: %w", err)
+		}
+		publicKey, err := pki.DecodePublicKey(publicKeyData)
+		if err != nil {
+			return fmt.Errorf("failed to decode token public key: %w", err)
+		}
+
+		authenticator = token.NewAuthenticator(token.NewDecoder(signing.NewVerifier(publicKey)), flags.TokenURL)
+	}
+
 	mux := http.NewServeMux()
 
-	gatewayOpts := []gateway.Option{}
-	blobsOpts := []blobs.Option{}
+	gatewayOpts := []gateway.Option{
+		gateway.WithLogger(logger),
+		gateway.WithAuthenticator(authenticator),
+		gateway.WithClient(httpClient),
+		gateway.WithDefaultRegistry(flags.DefaultRegistry),
+		gateway.WithOverrideDefaultRegistry(flags.OverrideDefaultRegistry),
+		gateway.WithPathInfoModifyFunc(func(info *gateway.ImageInfo) *gateway.ImageInfo {
+			if len(flags.RegistryAlias) != 0 {
+				h, ok := flags.RegistryAlias[info.Host]
+				if ok {
+					info.Host = h
+				}
+			}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-
-	manifestsOpts := []manifests.Option{
-		manifests.WithConcurrency(flags.Concurrency),
+			info.Host, info.Name = utils.CorrectImage(info.Host, info.Name)
+			return info
+		}),
+		gateway.WithDisableTagsList(flags.DisableTagsList),
 	}
 
 	gatewayOpts = append(gatewayOpts,
@@ -173,16 +250,21 @@ func runE(ctx context.Context, flags *flagpole) error {
 		gateway.WithDisableTagsList(flags.DisableTagsList),
 	)
 
-	blobsOpts = append(blobsOpts,
-		blobs.WithLogger(logger),
-		blobs.WithConcurrency(flags.Concurrency),
-		blobs.WithBlobNoRedirectSize(flags.BlobNoRedirectSize),
-		blobs.WithBlobNoRedirectMaxSizePerSecond(flags.BlobNoRedirectMaxSizePerSecond),
-		blobs.WithBlobCacheDuration(flags.BlobCacheDuration),
-		blobs.WithForceBlobNoRedirect(flags.ForceBlobNoRedirect),
-	)
-
 	if flags.StorageURL != "" {
+		manifestsOpts := []manifests.Option{
+			manifests.WithConcurrency(flags.Concurrency),
+		}
+
+		blobsOpts := []blobs.Option{
+			blobs.WithLogger(logger),
+			blobs.WithAuthenticator(authenticator),
+			blobs.WithConcurrency(flags.Concurrency),
+			blobs.WithBlobNoRedirectSize(flags.BlobNoRedirectSize),
+			blobs.WithBlobNoRedirectMaxSizePerSecond(flags.BlobNoRedirectMaxSizePerSecond),
+			blobs.WithBlobCacheDuration(flags.BlobCacheDuration),
+			blobs.WithForceBlobNoRedirect(flags.ForceBlobNoRedirect),
+		}
+
 		cacheOpts := []cache.Option{
 			cache.WithSignLink(flags.SignLink),
 		}
@@ -237,99 +319,34 @@ func runE(ctx context.Context, flags *flagpole) error {
 			}
 			blobsOpts = append(blobsOpts, blobs.WithBigCache(bigsdcache, flags.BigStorageSize))
 		}
-	}
 
-	if flags.TokenPublicKeyFile != "" {
-		if flags.TokenURL == "" {
-			return fmt.Errorf("token url is required")
+		if flags.QueueURL != "" {
+			queueClient := client.NewMessageClient(http.DefaultClient, flags.QueueURL, flags.QueueToken)
+			manifestsOpts = append(manifestsOpts, manifests.WithQueueClient(queueClient))
+			blobsOpts = append(blobsOpts, blobs.WithQueueClient(queueClient))
 		}
-		publicKeyData, err := os.ReadFile(flags.TokenPublicKeyFile)
+
+		manifestsOpts = append(manifestsOpts, manifests.WithClient(httpClient))
+		blobsOpts = append(blobsOpts, blobs.WithClient(httpClient))
+
+		manifest, err := manifests.NewManifests(
+			manifestsOpts...,
+		)
 		if err != nil {
-			return fmt.Errorf("failed to read token public key file: %w", err)
+			return fmt.Errorf("failed to create manifests: %w", err)
 		}
-		publicKey, err := pki.DecodePublicKey(publicKeyData)
+		blob, err := blobs.NewBlobs(
+			blobsOpts...,
+		)
 		if err != nil {
-			return fmt.Errorf("failed to decode token public key: %w", err)
+			return fmt.Errorf("failed to create blobs: %w", err)
 		}
 
-		authenticator := token.NewAuthenticator(token.NewDecoder(signing.NewVerifier(publicKey)), flags.TokenURL)
-		gatewayOpts = append(gatewayOpts, gateway.WithAuthenticator(authenticator))
-		blobsOpts = append(blobsOpts, blobs.WithAuthenticator(authenticator))
+		gatewayOpts = append(gatewayOpts,
+			gateway.WithManifests(manifest),
+			gateway.WithBlobs(blob),
+		)
 	}
-
-	transportOpts := []transport.Option{
-		transport.WithUserAndPass(flags.Userpass),
-		transport.WithLogger(logger),
-	}
-
-	tp, err := transport.NewTransport(transportOpts...)
-	if err != nil {
-		return fmt.Errorf("create clientset failed: %w", err)
-	}
-
-	if flags.RetryInterval > 0 {
-		tp = httpseek.NewMustReaderTransport(tp, func(request *http.Request, retry int, err error) error {
-			if errors.Is(err, context.Canceled) ||
-				errors.Is(err, context.DeadlineExceeded) {
-				return err
-			}
-			if flags.Retry > 0 && retry >= flags.Retry {
-				return err
-			}
-			if logger != nil {
-				logger.Warn("Retry", "url", request.URL, "retry", retry, "error", err)
-			}
-			time.Sleep(flags.RetryInterval)
-			return nil
-		})
-	}
-
-	if flags.QueueURL != "" {
-		queueClient := client.NewMessageClient(http.DefaultClient, flags.QueueURL, flags.QueueToken)
-		manifestsOpts = append(manifestsOpts, manifests.WithQueueClient(queueClient))
-		blobsOpts = append(blobsOpts, blobs.WithQueueClient(queueClient))
-	}
-
-	tp = transport.NewLogTransport(tp, logger, time.Second)
-
-	httpClient := &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) > 10 {
-				return http.ErrUseLastResponse
-			}
-			s := make([]string, 0, len(via)+1)
-			for _, v := range via {
-				s = append(s, v.URL.String())
-			}
-
-			lastRedirect := req.URL.String()
-			s = append(s, lastRedirect)
-			logger.Info("redirect", "redirects", s)
-
-			return nil
-		},
-		Transport: tp,
-	}
-	gatewayOpts = append(gatewayOpts, gateway.WithClient(httpClient))
-	blobsOpts = append(blobsOpts, blobs.WithClient(httpClient))
-
-	manifest, err := manifests.NewManifests(
-		manifestsOpts...,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create manifests: %w", err)
-	}
-	blob, err := blobs.NewBlobs(
-		blobsOpts...,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create blobs: %w", err)
-	}
-
-	gatewayOpts = append(gatewayOpts,
-		gateway.WithManifests(manifest),
-		gateway.WithBlobs(blob),
-	)
 
 	gw, err := gateway.NewGateway(gatewayOpts...)
 	if err != nil {

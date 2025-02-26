@@ -89,7 +89,8 @@ func WithQueueClient(queueClient *client.MessageClient) Option {
 
 func NewManifests(opts ...Option) (*Manifests, error) {
 	c := &Manifests{
-		logger: slog.Default(),
+		logger:     slog.Default(),
+		httpClient: http.DefaultClient,
 		acceptsItems: []string{
 			"application/vnd.oci.image.index.v1+json",
 			"application/vnd.docker.distribution.manifest.list.v2+json",

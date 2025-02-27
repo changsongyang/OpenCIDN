@@ -610,7 +610,7 @@ func (c *Agent) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob st
 		return
 	}
 
-	if c.blobNoRedirectSize > 0 && size > int64(c.blobNoRedirectSize) {
+	if size > int64(c.blobNoRedirectSize) {
 		c.serveCachedBlobRedirect(rw, r, blob, info, t, modTime, size, start)
 		return
 	}

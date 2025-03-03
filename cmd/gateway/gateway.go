@@ -70,6 +70,7 @@ type flagpole struct {
 	BlobNoRedirectMaxSizePerSecond int
 	BlobCacheDuration              time.Duration
 	ForceBlobNoRedirect            bool
+	FallbackRedirect               bool
 
 	DefaultRegistry         string
 	OverrideDefaultRegistry map[string]string
@@ -130,6 +131,7 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().IntVar(&flags.BlobNoRedirectMaxSizePerSecond, "blob-no-redirect-max-size-per-second", flags.BlobNoRedirectMaxSizePerSecond, "Maximum size per second for no redirect")
 	cmd.Flags().DurationVar(&flags.BlobCacheDuration, "blob-cache-duration", flags.BlobCacheDuration, "Blob cache duration")
 	cmd.Flags().BoolVar(&flags.ForceBlobNoRedirect, "force-blob-no-redirect", flags.ForceBlobNoRedirect, "Force blob no redirect")
+	cmd.Flags().BoolVar(&flags.FallbackRedirect, "fallback-redirect", flags.FallbackRedirect, "Fallback redirect")
 
 	cmd.Flags().StringVar(&flags.DefaultRegistry, "default-registry", flags.DefaultRegistry, "default registry used for non full-path docker pull, like:docker.io")
 	cmd.Flags().StringToStringVar(&flags.OverrideDefaultRegistry, "override-default-registry", flags.OverrideDefaultRegistry, "override default registry")
@@ -263,6 +265,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 			blobs.WithBlobNoRedirectMaxSizePerSecond(flags.BlobNoRedirectMaxSizePerSecond),
 			blobs.WithBlobCacheDuration(flags.BlobCacheDuration),
 			blobs.WithForceBlobNoRedirect(flags.ForceBlobNoRedirect),
+			blobs.WithFallbackRedirect(flags.ForceBlobNoRedirect),
 		}
 
 		cacheOpts := []cache.Option{

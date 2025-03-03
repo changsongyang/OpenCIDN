@@ -61,6 +61,7 @@ type flagpole struct {
 	BlobNoRedirectMaxSizePerSecond int
 	BlobCacheDuration              time.Duration
 	ForceBlobNoRedirect            bool
+	FallbackRedirect               bool
 
 	Concurrency int
 
@@ -109,6 +110,7 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().IntVar(&flags.BlobNoRedirectMaxSizePerSecond, "blob-no-redirect-max-size-per-second", flags.BlobNoRedirectMaxSizePerSecond, "Maximum size per second for no redirect")
 	cmd.Flags().DurationVar(&flags.BlobCacheDuration, "blob-cache-duration", flags.BlobCacheDuration, "Blob cache duration")
 	cmd.Flags().BoolVar(&flags.ForceBlobNoRedirect, "force-blob-no-redirect", flags.ForceBlobNoRedirect, "Force blob no redirect")
+	cmd.Flags().BoolVar(&flags.FallbackRedirect, "fallback-redirect", flags.FallbackRedirect, "Fallback redirect")
 
 	cmd.Flags().IntVar(&flags.Concurrency, "concurrency", flags.Concurrency, "Concurrency to source")
 
@@ -158,6 +160,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		blobs.WithBlobNoRedirectMaxSizePerSecond(flags.BlobNoRedirectMaxSizePerSecond),
 		blobs.WithBlobCacheDuration(flags.BlobCacheDuration),
 		blobs.WithForceBlobNoRedirect(flags.ForceBlobNoRedirect),
+		blobs.WithFallbackRedirect(flags.ForceBlobNoRedirect),
 		blobs.WithConcurrency(flags.Concurrency),
 	)
 

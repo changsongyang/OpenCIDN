@@ -64,6 +64,7 @@ type Blobs struct {
 	blobNoRedirectMaxSizePerSecond int
 	blobNoRedirectLimit            *rate.Limiter
 	forceBlobNoRedirect            bool
+	fallbackRedirect               bool
 
 	queueClient *client.MessageClient
 }
@@ -138,6 +139,13 @@ func WithBlobCacheDuration(blobCacheDuration time.Duration) Option {
 			blobCacheDuration = 10 * time.Second
 		}
 		c.blobCacheDuration = blobCacheDuration
+		return nil
+	}
+}
+
+func WithFallbackRedirect(b bool) Option {
+	return func(c *Blobs) error {
+		c.fallbackRedirect = b
 		return nil
 	}
 }
@@ -618,7 +626,7 @@ func (b *Blobs) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob st
 	ctx := r.Context()
 
 	if b.blobNoRedirectLimit != nil {
-		if b.blobNoRedirectLimit.Reserve().Delay() != 0 {
+		if b.fallbackRedirect && !b.blobNoRedirectLimit.Allow() {
 			b.serveCachedBlobRedirect(rw, r, blob, info, t, modTime, size, start)
 			return
 		}

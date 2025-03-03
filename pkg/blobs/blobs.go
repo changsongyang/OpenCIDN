@@ -65,6 +65,7 @@ type Blobs struct {
 	blobNoRedirectLimit            *rate.Limiter
 	forceBlobNoRedirect            bool
 	fallbackRedirect               bool
+	bigCacheNoLimit                bool
 
 	queueClient *client.MessageClient
 }
@@ -82,6 +83,13 @@ func WithBigCache(cache *cache.Cache, size int) Option {
 	return func(c *Blobs) error {
 		c.bigCache = cache
 		c.bigCacheSize = size
+		return nil
+	}
+}
+
+func WithBigCacheNoLimit(b bool) Option {
+	return func(c *Blobs) error {
+		c.bigCacheNoLimit = b
 		return nil
 	}
 }
@@ -590,7 +598,9 @@ func (b *Blobs) serveCachedBlobHead(rw http.ResponseWriter, r *http.Request, siz
 }
 
 func (b *Blobs) serveBigCachedBlob(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, modTime time.Time, size int64, start time.Time) {
-	b.rateLimit(rw, r, info.Blobs, info, t, size, start)
+	if b.bigCacheNoLimit {
+		b.rateLimit(rw, r, info.Blobs, info, t, size, start)
+	}
 
 	referer := r.RemoteAddr
 	if info != nil {

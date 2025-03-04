@@ -242,24 +242,6 @@ func runE(ctx context.Context, flags *flagpole) error {
 		gateway.WithDisableTagsList(flags.DisableTagsList),
 	}
 
-	gatewayOpts = append(gatewayOpts,
-		gateway.WithLogger(logger),
-		gateway.WithDefaultRegistry(flags.DefaultRegistry),
-		gateway.WithOverrideDefaultRegistry(flags.OverrideDefaultRegistry),
-		gateway.WithPathInfoModifyFunc(func(info *gateway.ImageInfo) *gateway.ImageInfo {
-			if len(flags.RegistryAlias) != 0 {
-				h, ok := flags.RegistryAlias[info.Host]
-				if ok {
-					info.Host = h
-				}
-			}
-
-			info.Host, info.Name = utils.CorrectImage(info.Host, info.Name)
-			return info
-		}),
-		gateway.WithDisableTagsList(flags.DisableTagsList),
-	)
-
 	if flags.StorageURL != "" {
 		manifestsOpts := []manifests.Option{
 			manifests.WithConcurrency(flags.Concurrency),

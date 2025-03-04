@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/OpenCIDN/OpenCIDN/internal/pki"
@@ -226,7 +228,11 @@ func runE(ctx context.Context, flags *flagpole) error {
 			if len(flags.RegistryAlias) != 0 {
 				h, ok := flags.RegistryAlias[info.Host]
 				if ok {
-					info.Host = h
+					s := strings.SplitN(h, "/", 2)
+					info.Host = s[0]
+					if len(s) > 1 && s[1] != "" {
+						info.Name = path.Join(s[1], info.Name)
+					}
 				}
 			}
 

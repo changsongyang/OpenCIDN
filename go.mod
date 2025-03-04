@@ -3,6 +3,7 @@ module github.com/OpenCIDN/OpenCIDN
 go 1.24
 
 require (
+	github.com/aws/aws-sdk-go v1.55.6
 	github.com/docker/distribution v2.8.3+incompatible
 	github.com/emicklei/go-restful-openapi/v2 v2.11.0
 	github.com/emicklei/go-restful/v3 v3.12.1
@@ -24,7 +25,6 @@ replace github.com/docker/distribution => github.com/distribution/distribution v
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
-	github.com/aws/aws-sdk-go v1.55.6 // indirect
 	github.com/docker/cli v27.5.0+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.8.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

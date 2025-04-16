@@ -76,6 +76,7 @@ func NewCommand() *cobra.Command {
 		BlobCacheDuration: time.Hour,
 		Concurrency:       10,
 		SignLink:          true,
+		LinkExpires:       1 * time.Hour,
 	}
 
 	cmd := &cobra.Command{

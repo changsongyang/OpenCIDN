@@ -93,6 +93,7 @@ func NewCommand() *cobra.Command {
 		ManifestCacheDuration: time.Hour,
 		Concurrency:           10,
 		SignLink:              true,
+		LinkExpires:           1 * time.Hour,
 	}
 
 	cmd := &cobra.Command{

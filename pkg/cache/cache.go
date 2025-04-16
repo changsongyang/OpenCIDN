@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -63,6 +64,10 @@ func NewCache(opts ...Option) (*Cache, error) {
 		opt(c)
 	}
 
+	_, err := c.put(context.Background(), "opencidn.txt", bytes.NewBufferString("opencidn"), nil)
+	if err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 

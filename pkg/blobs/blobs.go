@@ -623,14 +623,16 @@ func (b *Blobs) serveBigCachedBlob(rw http.ResponseWriter, r *http.Request, blob
 }
 
 func (b *Blobs) serveCachedBlob(rw http.ResponseWriter, r *http.Request, blob string, info *BlobInfo, t *token.Token, modTime time.Time, size int64, start time.Time) {
-	if t.AlwaysRedirect {
-		b.serveCachedBlobRedirect(rw, r, blob, info, t, modTime, size, start)
-		return
-	}
+	if !b.forceBlobNoRedirect {
+		if t.AlwaysRedirect {
+			b.serveCachedBlobRedirect(rw, r, blob, info, t, modTime, size, start)
+			return
+		}
 
-	if size > int64(b.blobNoRedirectSize) {
-		b.serveCachedBlobRedirect(rw, r, blob, info, t, modTime, size, start)
-		return
+		if size > int64(b.blobNoRedirectSize) {
+			b.serveCachedBlobRedirect(rw, r, blob, info, t, modTime, size, start)
+			return
+		}
 	}
 
 	ctx := r.Context()

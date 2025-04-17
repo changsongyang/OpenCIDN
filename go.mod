@@ -17,7 +17,7 @@ require (
 	github.com/wzshiming/httpseek v0.5.0
 	github.com/wzshiming/imc v0.0.0-20250106051804-1cb884b5184a
 	github.com/wzshiming/sss v0.0.0-20250306040928-a2fd0e34ae55
-	golang.org/x/crypto v0.35.0
+	golang.org/x/crypto v0.36.0
 	golang.org/x/time v0.10.0
 )
 
@@ -42,8 +42,8 @@ require (
 	github.com/spf13/pflag v1.0.6 // indirect
 	github.com/stretchr/testify v1.9.0 // indirect
 	github.com/wzshiming/trie v0.3.1 // indirect
-	golang.org/x/net v0.36.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )

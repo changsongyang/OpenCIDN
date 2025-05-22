@@ -163,7 +163,7 @@ func runE(ctx context.Context, flags *flagpole) error {
 		blobs.WithBlobNoRedirectMaxSizePerSecond(flags.BlobNoRedirectMaxSizePerSecond),
 		blobs.WithBlobCacheDuration(flags.BlobCacheDuration),
 		blobs.WithForceBlobNoRedirect(flags.ForceBlobNoRedirect),
-		blobs.WithFallbackRedirect(flags.ForceBlobNoRedirect),
+		blobs.WithFallbackRedirect(flags.FallbackRedirect),
 		blobs.WithConcurrency(flags.Concurrency),
 		blobs.WithBigCacheNoLimit(flags.BigCacheNoLimit),
 	)

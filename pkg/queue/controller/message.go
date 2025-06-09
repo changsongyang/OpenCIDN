@@ -541,9 +541,6 @@ func (mc *MessageController) Heartbeat(req *restful.Request, resp *restful.Respo
 	if heartbeatRequest.Data.Size > 0 {
 		curr.Data.Size = heartbeatRequest.Data.Size
 	}
-	if len(heartbeatRequest.Data.Spec) != 0 {
-		curr.Data.Spec = heartbeatRequest.Data.Spec
-	}
 
 	if err := mc.messageService.Heartbeat(req.Request.Context(), messageID, curr.Data, heartbeatRequest.Lease); err != nil {
 		resp.WriteHeaderAndEntity(http.StatusNotAcceptable, Error{Code: "MessageNotAcceptableError", Message: "Message not found: " + err.Error()})

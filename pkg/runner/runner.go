@@ -837,7 +837,6 @@ func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tag
 		Data: model.MessageAttr{
 			Host:  host,
 			Image: image,
-			Spec:  body,
 		},
 	})
 	r.logger.Info("start sync maifest", "url", u.String())

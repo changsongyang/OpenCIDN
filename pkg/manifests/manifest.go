@@ -228,9 +228,6 @@ func (c *Manifests) waitingQueue(ctx context.Context, msg string, weight int) ([
 		return nil, fmt.Errorf("failed to create queue: %w", err)
 	}
 
-	if len(mr.Data.Spec) != 0 {
-		return mr.Data.Spec, nil
-	}
 	if mr.Status == model.StatusPending || mr.Status == model.StatusProcessing {
 		c.logger.Info("watching message from queue", "msg", msg)
 
@@ -243,7 +240,7 @@ func (c *Manifests) waitingQueue(ctx context.Context, msg string, weight int) ([
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case m, ok := <-chMr:
+			case _, ok := <-chMr:
 				if !ok {
 					if mr.Status != model.StatusPending && mr.Status != model.StatusProcessing {
 						break watiQueue
@@ -254,11 +251,6 @@ func (c *Manifests) waitingQueue(ctx context.Context, msg string, weight int) ([
 					if err != nil {
 						return nil, fmt.Errorf("failed to re-watch message: %w", err)
 					}
-				} else {
-					if len(m.Data.Spec) != 0 {
-						return m.Data.Spec, nil
-					}
-					mr = m
 				}
 			}
 		}

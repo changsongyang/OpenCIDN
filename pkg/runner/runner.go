@@ -164,15 +164,19 @@ func (r *Runner) sync(ctx context.Context) {
 
 	wg := sync.WaitGroup{}
 
-	wg.Add(3)
+	wg.Add(4)
 	go func() {
 		defer wg.Done()
 		r.runBlobSync(ctx)
 	}()
+	go func() {
+		defer wg.Done()
+		r.runManifestSync(ctx, false)
+	}()
 	for i := 0; i != 2; i++ {
 		go func() {
 			defer wg.Done()
-			r.runManifestSync(ctx)
+			r.runManifestSync(ctx, true)
 		}()
 	}
 	wg.Wait()
@@ -200,9 +204,9 @@ func (r *Runner) runBlobSync(ctx context.Context) {
 	}
 }
 
-func (r *Runner) runManifestSync(ctx context.Context) {
+func (r *Runner) runManifestSync(ctx context.Context, deep bool) {
 	for {
-		err := r.runOnceManifestSync(context.Background())
+		err := r.runOnceManifestSync(context.Background(), deep)
 		if err != nil {
 			if err != errWait {
 				r.logger.Warn("runOnceManifestSync", "error", err)
@@ -294,13 +298,13 @@ func (r *Runner) getBlobPending() []client.MessageResponse {
 	return pendingMessages
 }
 
-func (r *Runner) getManifestPending() []client.MessageResponse {
+func (r *Runner) getManifestPending(deep bool) []client.MessageResponse {
 	r.pendingMut.Lock()
 	defer r.pendingMut.Unlock()
 
 	var pendingMessages []client.MessageResponse
 	for _, msg := range r.manifestPending {
-		if msg.Status == model.StatusPending {
+		if msg.Status == model.StatusPending && msg.Data.Deep == deep {
 			pendingMessages = append(pendingMessages, msg)
 		}
 	}
@@ -351,14 +355,14 @@ func (r *Runner) runOnceBlobSync(ctx context.Context) error {
 	return r.blobSync(ctx, resp)
 }
 
-func (r *Runner) runOnceManifestSync(ctx context.Context) error {
+func (r *Runner) runOnceManifestSync(ctx context.Context, deep bool) error {
 	var (
 		err  error
 		errs []error
 		resp client.MessageResponse
 	)
 
-	pending := r.getManifestPending()
+	pending := r.getManifestPending(deep)
 	if len(pending) == 0 {
 		return errWait
 	}

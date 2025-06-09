@@ -226,11 +226,10 @@ func (m *AuthManager) GetTokenWithUser(ctx context.Context, userinfo *url.Userin
 		TokenID:    tok.TokenID,
 		RegistryID: registry.Registry.RegistryID,
 
-		NoRateLimit:           tok.Data.NoRateLimit,
-		RateLimitPerSecond:    tok.Data.RateLimitPerSecond,
-		Weight:                tok.Data.Weight,
-		ManifestWithQueueSync: tok.Data.ManifestWithQueueSync,
-		CacheFirst:            tok.Data.CacheFirst,
+		NoRateLimit:        tok.Data.NoRateLimit,
+		RateLimitPerSecond: tok.Data.RateLimitPerSecond,
+		Weight:             tok.Data.Weight,
+		CacheFirst:         tok.Data.CacheFirst,
 
 		NoAllowlist:   tok.Data.NoAllowlist,
 		NoBlock:       tok.Data.NoBlock,

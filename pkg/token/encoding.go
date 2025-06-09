@@ -52,8 +52,6 @@ type Attribute struct {
 	CacheFirst    bool `json:"cache_first,omitempty"`
 	Weight        int  `json:"weight,omitempty"`
 
-	ManifestWithQueueSync bool `json:"manifest_with_queue_sync,omitempty"`
-
 	Host  string `json:"host,omitempty"`
 	Image string `json:"image,omitempty"`
 

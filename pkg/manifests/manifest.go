@@ -2,8 +2,6 @@ package manifests
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -41,6 +39,7 @@ type Manifests struct {
 	accepts      map[string]struct{}
 
 	queueClient *client.MessageClient
+	queueSync   bool
 }
 
 type Option func(c *Manifests)
@@ -84,6 +83,12 @@ func WithConcurrency(concurrency int) Option {
 func WithQueueClient(queueClient *client.MessageClient) Option {
 	return func(c *Manifests) {
 		c.queueClient = queueClient
+	}
+}
+
+func WithQueueSync(b bool) Option {
+	return func(c *Manifests) {
+		c.queueSync = b
 	}
 }
 
@@ -138,6 +143,14 @@ func (c *Manifests) worker(ctx context.Context) {
 	}
 }
 
+func formatPathInfo(info *PathInfo) string {
+	isHash := strings.HasPrefix(info.Manifests, "sha256:")
+	if isHash {
+		return fmt.Sprintf("%s/%s@%s", info.Host, info.Image, info.Manifests)
+	}
+	return fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
+}
+
 func (c *Manifests) Serve(rw http.ResponseWriter, r *http.Request, info *PathInfo, t *token.Token) {
 	ctx := r.Context()
 
@@ -146,13 +159,41 @@ func (c *Manifests) Serve(rw http.ResponseWriter, r *http.Request, info *PathInf
 		return
 	}
 
-	select {
-	case <-ctx.Done():
-		utils.ServeError(rw, r, ctx.Err(), 0)
-		return
-	case <-c.queue.AddWeight(*info, t.Weight):
+	ok, _ := c.cache.StatManifest(r.Context(), info.Host, info.Image, info.Manifests)
+	if ok {
+		if c.queueSync {
+			_, err := c.queueClient.Create(context.Background(), formatPathInfo(info), 0, model.MessageAttr{
+				Kind: model.KindManifest,
+				Deep: true,
+			})
+			if err != nil {
+				c.logger.Warn("failed to create queue message", "error", err)
+			}
+		} else {
+			c.queue.AddWeight(*info, 0)
+		}
+		if c.serveCachedManifest(rw, r, info, true, "try") {
+			return
+		}
+	} else {
+		if c.queueSync {
+			_, err := c.waitingQueue(ctx, formatPathInfo(info), t.Weight)
+			if err != nil {
+				c.logger.Warn("failed to wait queue message", "error", err)
+			} else {
+				if c.serveCachedManifest(rw, r, info, true, "try") {
+					return
+				}
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				utils.ServeError(rw, r, ctx.Err(), 0)
+				return
+			case <-c.queue.AddWeight(*info, t.Weight):
+			}
+		}
 	}
-
 	if c.missServeCachedManifest(rw, r, info) {
 		return
 	}
@@ -167,6 +208,7 @@ func (c *Manifests) waitingQueue(ctx context.Context, msg string, weight int) ([
 
 	mr, err := c.queueClient.Create(ctx, msg, weight+1, model.MessageAttr{
 		Kind: model.KindManifest,
+		Deep: false,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create queue: %w", err)
@@ -269,6 +311,7 @@ func (c *Manifests) cacheManifest(info *PathInfo) (int, error) {
 						msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
 						_, err := c.queueClient.Create(context.Background(), msg, 0, model.MessageAttr{
 							Kind: model.KindManifest,
+							Deep: true,
 						})
 						if err != nil {
 							c.logger.Warn("failed add message to queue", "msg", msg, "digest", digest, "error", err)
@@ -360,85 +403,6 @@ func (c *Manifests) cacheManifest(info *PathInfo) (int, error) {
 	return 0, nil
 }
 
-func (c *Manifests) cacheQueueManifest(info *PathInfo, weight int) error {
-	ctx := context.Background()
-	if !info.IsDigestManifests {
-		cachedDigest, err := c.cache.DigestManifest(ctx, info.Host, info.Image, info.Manifests)
-		if err == nil {
-			_, err := c.cache.StatBlob(ctx, cachedDigest)
-			if err == nil {
-
-				msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
-				_, err := c.queueClient.Create(context.Background(), msg, 0, model.MessageAttr{
-					Kind: model.KindManifest,
-				})
-				if err != nil {
-					c.logger.Warn("failed add message to queue", "msg", msg, "error", err)
-				} else {
-					c.logger.Info("Add message to queue", "msg", msg)
-				}
-				c.manifestCache.Put(info, cacheValue{
-					Digest: cachedDigest,
-				})
-				return nil
-			}
-		}
-	}
-
-	var msg string
-	if info.IsDigestManifests {
-		msg = fmt.Sprintf("%s/%s@%s", info.Host, info.Image, info.Manifests)
-	} else {
-		msg = fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
-	}
-	spec, err := c.waitingQueue(ctx, msg, weight)
-	if err != nil {
-		return err
-	}
-
-	if len(spec) == 0 {
-		exist, err := c.cache.StatManifest(ctx, info.Host, info.Image, info.Manifests)
-		if err != nil {
-			return err
-		}
-		if !exist {
-			return fmt.Errorf("spec is empty")
-		}
-		c.manifestCache.Put(info, cacheValue{
-			Digest: info.Manifests,
-		})
-		return nil
-	}
-
-	mt := struct {
-		MediaType string          `json:"mediaType"`
-		Manifests json.RawMessage `json:"manifests"`
-	}{}
-	err = json.Unmarshal(spec, &mt)
-	if err != nil {
-		return fmt.Errorf("invalid content: %w: %s", err, string(spec))
-	}
-
-	mediaType := mt.MediaType
-	if mediaType == "" {
-		if len(mt.Manifests) != 0 {
-			mediaType = "application/vnd.oci.image.index.v1+json"
-		} else {
-			mediaType = "application/vnd.docker.distribution.manifest.v1+json"
-		}
-	}
-
-	sum := sha256.Sum256(spec)
-	digest := "sha256:" + hex.EncodeToString(sum[:])
-	c.manifestCache.Put(info, cacheValue{
-		Digest:    digest,
-		MediaType: mediaType,
-		Length:    strconv.FormatInt(int64(len(spec)), 10),
-		Body:      spec,
-	})
-	return nil
-}
-
 func (c *Manifests) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.Request, info *PathInfo, t *token.Token) (done bool) {
 	val, ok := c.manifestCache.Get(info)
 	if ok {
@@ -475,23 +439,6 @@ func (c *Manifests) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.
 
 	if t.CacheFirst {
 		return c.serveCachedManifest(rw, r, info, true, "try")
-	}
-
-	ok, _ = c.cache.StatManifest(r.Context(), info.Host, info.Image, info.Manifests)
-	if ok {
-		c.queue.AddWeight(*info, 0)
-		return c.serveCachedManifest(rw, r, info, true, "try")
-	}
-
-	if t.ManifestWithQueueSync {
-		if c.queueClient != nil {
-			err := c.cacheQueueManifest(info, t.Weight)
-			if err != nil {
-				c.manifestCache.PutError(info, err, http.StatusForbidden)
-				return false
-			}
-			return true
-		}
 	}
 
 	return false

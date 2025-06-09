@@ -234,7 +234,8 @@ func (r *Runner) runWatch(ctx context.Context) error {
 	r.pendingMut.Unlock()
 
 	for msg := range ch {
-		if strings.HasPrefix(msg.Content, "sha256:") {
+		switch msg.Data.Kind {
+		case model.KindBlob:
 			r.pendingMut.Lock()
 			if msg.Status == model.StatusPending {
 				r.blobPending[msg.MessageID] = msg
@@ -249,7 +250,7 @@ func (r *Runner) runWatch(ctx context.Context) error {
 				default:
 				}
 			}
-		} else {
+		case model.KindManifest:
 			r.pendingMut.Lock()
 			if msg.Status == model.StatusPending {
 				r.manifestPending[msg.MessageID] = msg
@@ -857,6 +858,7 @@ func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tag
 				msg := fmt.Sprintf("%s/%s@%s", host, image, l.Digest)
 				r.logger.Info("Create manifest", "msg", msg)
 				mr, err := r.queueClient.Create(ctx, msg, priority, model.MessageAttr{
+					Kind:  model.KindBlob,
 					Host:  host,
 					Image: image,
 					Size:  l.Size,
@@ -909,6 +911,7 @@ func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tag
 
 				r.logger.Info("Create blob", "msg", l.Digest)
 				mr, err := r.queueClient.Create(ctx, l.Digest, priority, model.MessageAttr{
+					Kind:  model.KindBlob,
 					Host:  host,
 					Image: image,
 					Size:  l.Size,
@@ -941,6 +944,7 @@ func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tag
 
 			r.logger.Info("Create config blob", "msg", l.Digest)
 			mr, err := r.queueClient.Create(ctx, l.Digest, priority, model.MessageAttr{
+				Kind:  model.KindBlob,
 				Host:  host,
 				Image: image,
 				Size:  l.Size,

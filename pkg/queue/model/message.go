@@ -25,7 +25,14 @@ type Message struct {
 	LastHeartbeat time.Time
 }
 
+const (
+	KindBlob     = "blob"
+	KindManifest = "manifest"
+)
+
 type MessageAttr struct {
+	Kind string `json:"kind"`
+
 	Error string `json:"error,omitempty"`
 
 	Host     string `json:"host,omitempty"`

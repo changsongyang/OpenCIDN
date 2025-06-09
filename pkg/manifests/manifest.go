@@ -165,7 +165,9 @@ func (c *Manifests) waitingQueue(ctx context.Context, msg string, weight int) ([
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	mr, err := c.queueClient.Create(ctx, msg, weight+1, model.MessageAttr{})
+	mr, err := c.queueClient.Create(ctx, msg, weight+1, model.MessageAttr{
+		Kind: model.KindManifest,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create queue: %w", err)
 	}
@@ -265,7 +267,9 @@ func (c *Manifests) cacheManifest(info *PathInfo) (int, error) {
 				if err == nil {
 					if cachedDigest != digest {
 						msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
-						_, err := c.queueClient.Create(context.Background(), msg, 0, model.MessageAttr{})
+						_, err := c.queueClient.Create(context.Background(), msg, 0, model.MessageAttr{
+							Kind: model.KindManifest,
+						})
 						if err != nil {
 							c.logger.Warn("failed add message to queue", "msg", msg, "digest", digest, "error", err)
 						} else {
@@ -365,7 +369,9 @@ func (c *Manifests) cacheQueueManifest(info *PathInfo, weight int) error {
 			if err == nil {
 
 				msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
-				_, err := c.queueClient.Create(context.Background(), msg, 0, model.MessageAttr{})
+				_, err := c.queueClient.Create(context.Background(), msg, 0, model.MessageAttr{
+					Kind: model.KindManifest,
+				})
 				if err != nil {
 					c.logger.Warn("failed add message to queue", "msg", msg, "error", err)
 				} else {

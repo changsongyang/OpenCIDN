@@ -656,7 +656,7 @@ func (r *Runner) manifestSync(ctx context.Context, resp client.MessageResponse) 
 	var errCh = make(chan error, 1)
 	var gotSize, progress atomic.Int64
 	go func() {
-		errCh <- r.manifest(ctx, resp.MessageID, host, image, tagOrBlob, resp.Priority, &gotSize, &progress)
+		errCh <- r.manifest(ctx, resp.MessageID, host, image, tagOrBlob, resp.Data.Deep, resp.Priority, &gotSize, &progress)
 	}()
 
 	return r.heartbeat(ctx, resp.MessageID, &gotSize, &progress, errCh)
@@ -738,7 +738,7 @@ func (r *Runner) heartbeat(ctx context.Context, messageID int64, gotSize, progre
 
 var acceptsStr = "application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json"
 
-func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tagOrBlob string, priority int, gotSize, progress *atomic.Int64) error {
+func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tagOrBlob string, deep bool, priority int, gotSize, progress *atomic.Int64) error {
 
 	u := &url.URL{
 		Scheme: "https",
@@ -842,6 +842,16 @@ func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tag
 	})
 	r.logger.Info("start sync maifest", "url", u.String())
 
+	if !deep {
+		for _, cache := range subCaches {
+			_, _, _, err := cache.PutManifestContent(ctx, host, image, tagOrBlob, body)
+			if err != nil {
+				r.logger.Error("PutManifest", "error", err)
+			}
+		}
+		return nil
+	}
+
 	{
 		m := spec.IndexManifestLayers{}
 		json.Unmarshal(body, &m)
@@ -899,7 +909,6 @@ func (r *Runner) manifest(ctx context.Context, messageID int64, host, image, tag
 			return nil
 		}
 	}
-
 	{
 		m := spec.ManifestLayers{}
 		json.Unmarshal(body, &m)

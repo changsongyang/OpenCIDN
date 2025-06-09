@@ -82,6 +82,7 @@ type flagpole struct {
 
 	QueueURL   string
 	QueueToken string
+	QueueSync  bool
 }
 
 func NewCommand() *cobra.Command {
@@ -142,6 +143,7 @@ func NewCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&flags.QueueToken, "queue-token", flags.QueueToken, "Queue token")
 	cmd.Flags().StringVar(&flags.QueueURL, "queue-url", flags.QueueURL, "Queue URL")
+	cmd.Flags().BoolVar(&flags.QueueSync, "queue-sync", flags.QueueSync, "Queue sync")
 
 	return cmd
 }
@@ -311,8 +313,13 @@ func runE(ctx context.Context, flags *flagpole) error {
 
 		if flags.QueueURL != "" {
 			queueClient := client.NewMessageClient(http.DefaultClient, flags.QueueURL, flags.QueueToken)
-			manifestsOpts = append(manifestsOpts, manifests.WithQueueClient(queueClient))
-			blobsOpts = append(blobsOpts, blobs.WithQueueClient(queueClient))
+			manifestsOpts = append(manifestsOpts,
+				manifests.WithQueueClient(queueClient),
+				manifests.WithQueueSync(flags.QueueSync),
+			)
+			blobsOpts = append(blobsOpts,
+				blobs.WithQueueClient(queueClient),
+			)
 		}
 
 		manifestsOpts = append(manifestsOpts, manifests.WithClient(httpClient))

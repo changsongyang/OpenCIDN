@@ -42,8 +42,6 @@ type MessageAttr struct {
 
 	Deep bool `json:"deep,omitempty"`
 
-	Spec []byte `json:"spec,omitempty"`
-
 	// Deprecate
 	Blobs []Blob `json:"blobs,omitempty"`
 }

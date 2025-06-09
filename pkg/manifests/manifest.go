@@ -192,6 +192,9 @@ func (c *Manifests) Serve(rw http.ResponseWriter, r *http.Request, info *PathInf
 				} else if strings.Contains(errStr, "unsupported target response") {
 					utils.ServeError(rw, r, errcode.ErrorCodeDenied.WithMessage("unsupported response"), 0)
 					return
+				} else if strings.Contains(errStr, "DENIED") {
+					utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
+					return
 				}
 				c.logger.Warn("failed to wait queue message", "error", err)
 			} else {

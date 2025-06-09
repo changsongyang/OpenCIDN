@@ -712,6 +712,7 @@ func (b *Blobs) waitingQueue(ctx context.Context, msg string, weight int, info *
 	defer cancel()
 
 	mr, err := b.queueClient.Create(ctx, msg, weight+1, model.MessageAttr{
+		Kind:  model.KindBlob,
 		Host:  info.Host,
 		Image: info.Image,
 	})

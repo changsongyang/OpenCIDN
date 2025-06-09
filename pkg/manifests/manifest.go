@@ -240,17 +240,16 @@ func (c *Manifests) waitingQueue(ctx context.Context, msg string, weight int) ([
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case _, ok := <-chMr:
+			case mr, ok := <-chMr:
 				if !ok {
-					if mr.Status != model.StatusPending && mr.Status != model.StatusProcessing {
-						break watiQueue
-					}
-
 					time.Sleep(1 * time.Second)
 					chMr, err = c.queueClient.Watch(ctx, mr.MessageID)
 					if err != nil {
 						return nil, fmt.Errorf("failed to re-watch message: %w", err)
 					}
+
+				} else if mr.Status != model.StatusPending && mr.Status != model.StatusProcessing {
+					break watiQueue
 				}
 			}
 		}

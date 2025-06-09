@@ -179,6 +179,20 @@ func (c *Manifests) Serve(rw http.ResponseWriter, r *http.Request, info *PathInf
 		if c.queueSync {
 			_, err := c.waitingQueue(ctx, formatPathInfo(info), t.Weight)
 			if err != nil {
+				errStr := err.Error()
+				if strings.Contains(errStr, "status code 404") {
+					utils.ServeError(rw, r, errcode.ErrorCodeDenied.WithMessage("manifest unknown"), http.StatusNotFound)
+					return
+				} else if strings.Contains(errStr, "status code 403") {
+					utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
+					return
+				} else if strings.Contains(errStr, "status code 401") {
+					utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
+					return
+				} else if strings.Contains(errStr, "unsupported target response") {
+					utils.ServeError(rw, r, errcode.ErrorCodeDenied.WithMessage("unsupported response"), 0)
+					return
+				}
 				c.logger.Warn("failed to wait queue message", "error", err)
 			} else {
 				if c.serveCachedManifest(rw, r, info, true, "try") {

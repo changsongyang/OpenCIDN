@@ -228,14 +228,6 @@ func (b *Blobs) worker(ctx context.Context) {
 			return
 		}
 
-		if b.queueClient != nil {
-			_, err := b.waitingQueue(ctx, info.Blobs, weight, &info)
-			if err == nil {
-				finish()
-				continue
-			}
-			b.logger.Warn("waitingQueue error", "info", info, "error", err)
-		}
 		size, continueFunc, sc, err := b.cacheBlob(&info)
 		if err != nil {
 			b.logger.Warn("failed download file request", "info", info, "error", err)
@@ -392,10 +384,30 @@ func (b *Blobs) Serve(rw http.ResponseWriter, r *http.Request, info *BlobInfo, t
 		return
 	}
 
-	select {
-	case <-ctx.Done():
-		return
-	case <-b.queue.AddWeight(*info, t.Weight):
+	if b.queueClient != nil {
+		err := b.waitingQueue(ctx, info.Blobs, t.Weight, info)
+		if err != nil {
+			errStr := err.Error()
+			if strings.Contains(errStr, "status code 404") {
+				utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
+				return
+			} else if strings.Contains(errStr, "status code 403") {
+				utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
+				return
+			} else if strings.Contains(errStr, "status code 401") {
+				utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
+				return
+			}
+			b.logger.Warn("failed to wait queue message", "error", err)
+			utils.ServeError(rw, r, errcode.ErrorCodeUnknown, 0)
+			return
+		}
+	} else {
+		select {
+		case <-ctx.Done():
+			return
+		case <-b.queue.AddWeight(*info, t.Weight):
+		}
 	}
 
 	if b.serveCache(rw, r, info, t) {
@@ -624,7 +636,7 @@ func (b *Blobs) serveCachedBlobRedirect(rw http.ResponseWriter, r *http.Request,
 	http.Redirect(rw, r, u, http.StatusTemporaryRedirect)
 }
 
-func (b *Blobs) waitingQueue(ctx context.Context, msg string, weight int, info *BlobInfo) (client.MessageResponse, error) {
+func (b *Blobs) waitingQueue(ctx context.Context, msg string, weight int, info *BlobInfo) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -634,7 +646,7 @@ func (b *Blobs) waitingQueue(ctx context.Context, msg string, weight int, info *
 		Image: info.Image,
 	})
 	if err != nil {
-		return client.MessageResponse{}, fmt.Errorf("failed to create queue: %w", err)
+		return fmt.Errorf("failed to create queue: %w", err)
 	}
 
 	if mr.Status == model.StatusPending || mr.Status == model.StatusProcessing {
@@ -642,26 +654,25 @@ func (b *Blobs) waitingQueue(ctx context.Context, msg string, weight int, info *
 
 		chMr, err := b.queueClient.Watch(ctx, mr.MessageID)
 		if err != nil {
-			return client.MessageResponse{}, fmt.Errorf("failed to watch message: %w", err)
+			return fmt.Errorf("failed to watch message: %w", err)
 		}
 	watiQueue:
 		for {
 			select {
 			case <-ctx.Done():
-				return client.MessageResponse{}, ctx.Err()
+				return ctx.Err()
 			case m, ok := <-chMr:
 				if !ok {
-					if mr.Status != model.StatusPending && mr.Status != model.StatusProcessing {
-						break watiQueue
-					}
-
 					time.Sleep(1 * time.Second)
 					chMr, err = b.queueClient.Watch(ctx, mr.MessageID)
 					if err != nil {
-						return client.MessageResponse{}, fmt.Errorf("failed to re-watch message: %w", err)
+						return fmt.Errorf("failed to re-watch message: %w", err)
 					}
 				} else {
 					mr = m
+					if mr.Status != model.StatusPending && mr.Status != model.StatusProcessing {
+						break watiQueue
+					}
 				}
 			}
 		}
@@ -669,10 +680,10 @@ func (b *Blobs) waitingQueue(ctx context.Context, msg string, weight int, info *
 
 	switch mr.Status {
 	case model.StatusCompleted:
-		return mr, nil
+		return nil
 	case model.StatusFailed:
-		return client.MessageResponse{}, fmt.Errorf("%q Queue Error: %s", msg, mr.Data.Error)
+		return fmt.Errorf("%q Queue Error: %s", msg, mr.Data.Error)
 	default:
-		return client.MessageResponse{}, fmt.Errorf("unexpected status %d for message %q", mr.Status, msg)
+		return fmt.Errorf("unexpected status %d for message %q", mr.Status, msg)
 	}
 }

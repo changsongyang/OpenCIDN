@@ -534,7 +534,6 @@ func (mc *MessageController) Heartbeat(req *restful.Request, resp *restful.Respo
 		return
 	}
 
-	curr.Data.Blobs = heartbeatRequest.Data.Blobs
 	if heartbeatRequest.Data.Progress != 0 {
 		curr.Data.Progress = heartbeatRequest.Data.Progress
 	}

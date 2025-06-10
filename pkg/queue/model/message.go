@@ -41,16 +41,6 @@ type MessageAttr struct {
 	Size     int64  `json:"size,omitempty"`
 
 	Deep bool `json:"deep,omitempty"`
-
-	// Deprecate
-	Blobs []Blob `json:"blobs,omitempty"`
-}
-
-type Blob struct {
-	Digest   string `json:"digest"`
-	Progress int64  `json:"progress"`
-	Size     int64  `json:"size"`
-	Error    string `json:"error,omitempty"`
 }
 
 func (n *MessageAttr) Scan(value any) error {

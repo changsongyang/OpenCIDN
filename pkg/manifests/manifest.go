@@ -39,7 +39,6 @@ type Manifests struct {
 	accepts      map[string]struct{}
 
 	queueClient *client.MessageClient
-	queueSync   bool
 }
 
 type Option func(c *Manifests)
@@ -83,12 +82,6 @@ func WithConcurrency(concurrency int) Option {
 func WithQueueClient(queueClient *client.MessageClient) Option {
 	return func(c *Manifests) {
 		c.queueClient = queueClient
-	}
-}
-
-func WithQueueSync(b bool) Option {
-	return func(c *Manifests) {
-		c.queueSync = b
 	}
 }
 
@@ -161,27 +154,31 @@ func (c *Manifests) Serve(rw http.ResponseWriter, r *http.Request, info *PathInf
 
 	ok, _ := c.cache.StatManifest(r.Context(), info.Host, info.Image, info.Manifests)
 	if ok {
-		if c.queueSync {
+		if c.queueClient != nil {
 			_, err := c.queueClient.Create(context.Background(), formatPathInfo(info), 0, model.MessageAttr{
-				Kind: model.KindManifest,
-				Deep: true,
+				Kind:  model.KindManifest,
+				Host:  info.Host,
+				Image: info.Image,
+				Deep:  true,
 			})
 			if err != nil {
 				c.logger.Warn("failed to create queue message", "error", err)
+				utils.ServeError(rw, r, errcode.ErrorCodeUnknown, 0)
+				return
 			}
 		} else {
 			c.queue.AddWeight(*info, 0)
 		}
-		if c.serveCachedManifest(rw, r, info, true, "try") {
+		if c.serveCachedManifest(rw, r, info, true, "cached") {
 			return
 		}
 	} else {
-		if c.queueSync {
-			_, err := c.waitingQueue(ctx, formatPathInfo(info), t.Weight)
+		if c.queueClient != nil {
+			err := c.waitingQueue(ctx, formatPathInfo(info), t.Weight, info)
 			if err != nil {
 				errStr := err.Error()
 				if strings.Contains(errStr, "status code 404") {
-					utils.ServeError(rw, r, errcode.ErrorCodeDenied.WithMessage("manifest unknown"), http.StatusNotFound)
+					utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
 					return
 				} else if strings.Contains(errStr, "status code 403") {
 					utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
@@ -190,15 +187,17 @@ func (c *Manifests) Serve(rw http.ResponseWriter, r *http.Request, info *PathInf
 					utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
 					return
 				} else if strings.Contains(errStr, "unsupported target response") {
-					utils.ServeError(rw, r, errcode.ErrorCodeDenied.WithMessage("unsupported response"), 0)
+					utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
 					return
 				} else if strings.Contains(errStr, "DENIED") {
 					utils.ServeError(rw, r, errcode.ErrorCodeDenied, 0)
 					return
 				}
 				c.logger.Warn("failed to wait queue message", "error", err)
+				utils.ServeError(rw, r, errcode.ErrorCodeUnknown, 0)
+				return
 			} else {
-				if c.serveCachedManifest(rw, r, info, true, "try") {
+				if c.serveCachedManifest(rw, r, info, true, "cache") {
 					return
 				}
 			}
@@ -219,16 +218,18 @@ func (c *Manifests) Serve(rw http.ResponseWriter, r *http.Request, info *PathInf
 	utils.ServeError(rw, r, errcode.ErrorCodeUnknown, 0)
 }
 
-func (c *Manifests) waitingQueue(ctx context.Context, msg string, weight int) ([]byte, error) {
+func (c *Manifests) waitingQueue(ctx context.Context, msg string, weight int, info *PathInfo) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	mr, err := c.queueClient.Create(ctx, msg, weight+1, model.MessageAttr{
-		Kind: model.KindManifest,
-		Deep: false,
+		Kind:  model.KindManifest,
+		Host:  info.Host,
+		Image: info.Image,
+		Deep:  false,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create queue: %w", err)
+		return fmt.Errorf("failed to create queue: %w", err)
 	}
 
 	if mr.Status == model.StatusPending || mr.Status == model.StatusProcessing {
@@ -236,19 +237,19 @@ func (c *Manifests) waitingQueue(ctx context.Context, msg string, weight int) ([
 
 		chMr, err := c.queueClient.Watch(ctx, mr.MessageID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to watch message: %w", err)
+			return fmt.Errorf("failed to watch message: %w", err)
 		}
 	watiQueue:
 		for {
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return ctx.Err()
 			case m, ok := <-chMr:
 				if !ok {
 					time.Sleep(1 * time.Second)
 					chMr, err = c.queueClient.Watch(ctx, mr.MessageID)
 					if err != nil {
-						return nil, fmt.Errorf("failed to re-watch message: %w", err)
+						return fmt.Errorf("failed to re-watch message: %w", err)
 					}
 				} else {
 					mr = m
@@ -262,11 +263,11 @@ func (c *Manifests) waitingQueue(ctx context.Context, msg string, weight int) ([
 
 	switch mr.Status {
 	case model.StatusCompleted:
-		return nil, nil
+		return nil
 	case model.StatusFailed:
-		return nil, fmt.Errorf("%q Queue Error: %s", msg, mr.Data.Error)
+		return fmt.Errorf("%q Queue Error: %s", msg, mr.Data.Error)
 	default:
-		return nil, fmt.Errorf("unexpected status %d for message %q", mr.Status, msg)
+		return fmt.Errorf("unexpected status %d for message %q", mr.Status, msg)
 	}
 }
 
@@ -310,32 +311,6 @@ func (c *Manifests) cacheManifest(info *PathInfo) (int, error) {
 		digest := resp.Header.Get("Docker-Content-Digest")
 		if digest == "" {
 			return 0, errcode.ErrorCodeDenied
-		}
-
-		if c.queueClient != nil {
-			cachedDigest, err := c.cache.DigestManifest(ctx, info.Host, info.Image, info.Manifests)
-			if err == nil {
-				_, err := c.cache.StatBlob(ctx, cachedDigest)
-				if err == nil {
-					if cachedDigest != digest {
-						msg := fmt.Sprintf("%s/%s:%s", info.Host, info.Image, info.Manifests)
-						_, err := c.queueClient.Create(context.Background(), msg, 0, model.MessageAttr{
-							Kind: model.KindManifest,
-							Deep: true,
-						})
-						if err != nil {
-							c.logger.Warn("failed add message to queue", "msg", msg, "digest", digest, "error", err)
-						} else {
-							c.logger.Info("Add message to queue", "msg", msg, "digest", digest)
-						}
-						digest = cachedDigest
-					}
-					c.manifestCache.Put(info, cacheValue{
-						Digest: digest,
-					})
-					return 0, nil
-				}
-			}
 		}
 
 		err = c.cache.RelinkManifest(ctx, info.Host, info.Image, info.Manifests, digest)

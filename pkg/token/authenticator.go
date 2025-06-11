@@ -28,7 +28,7 @@ func getImage(path string) (string, bool) {
 	const prefix = "/v2/"
 	path = strings.TrimPrefix(path, prefix)
 	parts := strings.Split(path, "/")
-	if len(parts) < 4 {
+	if len(parts) < 3 {
 		return "", false
 	}
 	return strings.Join(parts[0:len(parts)-2], "/"), true

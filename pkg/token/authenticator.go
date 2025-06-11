@@ -24,6 +24,16 @@ func NewAuthenticator(
 	}
 }
 
+func getImage(path string) (string, bool) {
+	const prefix = "/v2/"
+	path = strings.TrimPrefix(path, prefix)
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 {
+		return "", false
+	}
+	return strings.Join(parts[0:len(parts)-2], "/"), true
+}
+
 func (c *Authenticator) Authenticate(rw http.ResponseWriter, r *http.Request) {
 	tokenURL := c.tokenURL
 	if tokenURL == "" {
@@ -34,6 +44,11 @@ func (c *Authenticator) Authenticate(rw http.ResponseWriter, r *http.Request) {
 		tokenURL = scheme + "://" + r.Host + "/auth/token"
 	}
 	header := fmt.Sprintf("Bearer realm=%q,service=%q", tokenURL, r.Host)
+
+	if image, ok := getImage(r.URL.Path); ok {
+		header += fmt.Sprintf(`,scope="repository:%s:pull"`, image)
+	}
+
 	rw.Header().Set("WWW-Authenticate", header)
 	errcode.ServeJSON(rw, errcode.ErrorCodeUnauthorized)
 }

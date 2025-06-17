@@ -111,6 +111,12 @@ func (m *manifestCache) Put(info *PathInfo, val cacheValue) {
 
 }
 
+func (m *manifestCache) Remove(info *PathInfo) {
+	key := manifestCacheKey(info)
+	m.tag.Remove(key)
+	m.digest.Remove(key)
+}
+
 type cacheKey struct {
 	Host  string
 	Image string

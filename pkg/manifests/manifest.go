@@ -397,7 +397,11 @@ func (c *Manifests) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.
 		}
 
 		if val.MediaType == "" || val.Length == "" {
-			return c.serveCachedManifest(rw, r, info, true, "hit and mark")
+			if c.serveCachedManifest(rw, r, info, true, "hit and mark") {
+				return true
+			}
+			c.manifestCache.Remove(info)
+			return false
 		}
 
 		if r.Method == http.MethodHead {
@@ -415,7 +419,11 @@ func (c *Manifests) tryFirstServeCachedManifest(rw http.ResponseWriter, r *http.
 			return true
 		}
 
-		return c.serveCachedManifest(rw, r, info, false, "hit")
+		if c.serveCachedManifest(rw, r, info, false, "hit") {
+			return true
+		}
+		c.manifestCache.Remove(info)
+		return false
 	}
 
 	if info.IsDigestManifests {

@@ -126,7 +126,7 @@ func (r *Registry) UpdateByID(ctx context.Context, registryID, userID int64, reg
 }
 
 const deleteRegistryByIDSQL = `
-DELETE FROM registries WHERE id = ? AND user_id = ? AND delete_at IS NULL
+UPDATE registries SET delete_at = NOW() WHERE id = ? AND user_id = ? AND delete_at IS NULL
 `
 
 func (r *Registry) DeleteByID(ctx context.Context, registryID, userID int64) error {

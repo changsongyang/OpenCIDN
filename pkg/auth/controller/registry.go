@@ -93,7 +93,7 @@ func (rc *RegistryController) RegisterRoutes(ws *restful.WebService) {
 		Operation("updateRegistryAllowImages").
 		Produces(restful.MIME_JSON).
 		Reads(RegistryUpdateAllowImagesRequest{}).
-		Returns(http.StatusNoContent, "Registry deleted successfully.", nil).
+		Returns(http.StatusNoContent, "Registry updated successfully.", nil).
 		Returns(http.StatusBadRequest, "Invalid request format.", Error{}))
 
 	ws.Route(ws.PUT("/registries/ips/data").To(rc.UpdateIPData).

@@ -38,22 +38,9 @@ func (c *Cache) RelinkManifest(ctx context.Context, host, image, tag string, blo
 }
 
 func (c *Cache) PutManifestContent(ctx context.Context, host, image, tagOrBlob string, content []byte) (int64, string, string, error) {
-	mt := struct {
-		MediaType string          `json:"mediaType"`
-		Manifests json.RawMessage `json:"manifests"`
-	}{}
-	err := json.Unmarshal(content, &mt)
+	mediaType, err := getMediaType(content)
 	if err != nil {
 		return 0, "", "", fmt.Errorf("invalid content: %w: %s", err, string(content))
-	}
-
-	mediaType := mt.MediaType
-	if mediaType == "" {
-		if len(mt.Manifests) != 0 {
-			mediaType = "application/vnd.oci.image.index.v1+json"
-		} else {
-			mediaType = "application/vnd.docker.distribution.manifest.v1+json"
-		}
 	}
 
 	h := sha256.New()
@@ -105,11 +92,7 @@ func (c *Cache) GetManifestContent(ctx context.Context, host, image, tagOrBlob s
 		return nil, "", "", err
 	}
 
-	mt := struct {
-		MediaType string          `json:"mediaType"`
-		Manifests json.RawMessage `json:"manifests"`
-	}{}
-	err = json.Unmarshal(content, &mt)
+	mediaType, err := getMediaType(content)
 	if err != nil {
 		cleanErr := c.DeleteBlob(ctx, digest)
 		if cleanErr != nil {
@@ -122,16 +105,28 @@ func (c *Cache) GetManifestContent(ctx context.Context, host, image, tagOrBlob s
 		return nil, "", "", fmt.Errorf("invalid content: %w: %s", err, string(content))
 	}
 
+	return content, digest, mediaType, nil
+}
+
+func getMediaType(content []byte) (string, error) {
+	mt := struct {
+		MediaType string          `json:"mediaType"`
+		Manifests json.RawMessage `json:"manifests"`
+	}{}
+	err := json.Unmarshal(content, &mt)
+	if err != nil {
+		return "", err
+	}
+
 	mediaType := mt.MediaType
 	if mediaType == "" {
 		if len(mt.Manifests) != 0 {
 			mediaType = "application/vnd.oci.image.index.v1+json"
 		} else {
-			mediaType = "application/vnd.docker.distribution.manifest.v1+json"
+			mediaType = "application/vnd.oci.image.manifest.v1+json"
 		}
 	}
-
-	return content, digest, mediaType, nil
+	return mediaType, nil
 }
 
 func (c *Cache) DigestManifest(ctx context.Context, host, image, tag string) (string, error) {
